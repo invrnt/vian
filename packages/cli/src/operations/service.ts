@@ -1,0 +1,35 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import type { CommandContext } from '@vian/core';
+
+export function renderUserUnit(executable: string): string {
+  if (/[\r\n]/.test(executable)) throw new Error('Invalid executable path');
+  return `[Unit]\nDescription=Vian bot daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${executable.replaceAll('%', '%%')} daemon\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n`;
+}
+
+export async function serviceCommand(verb: string, context: CommandContext, run = async (command: string, args: string[]) => {
+  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', chunk => stdout += chunk);
+  child.stderr.on('data', chunk => stderr += chunk);
+  const code = await new Promise<number>(resolve => child.on('close', result => resolve(result ?? 1)));
+  return { code, stdout, stderr };
+}, options: { unitDir?: string; executable?: string } = {}): Promise<number> {
+  const unitDir = options.unitDir ?? join(homedir(), '.config/systemd/user');
+  const unitPath = join(unitDir, 'vian.service');
+  if (verb === 'install') {
+    if (!options.executable && /\/packages\/cli\/src\/main\.ts$/.test(Bun.main)) throw new Error('Build the standalone Vian executable before installing the service');
+    await mkdir(unitDir, { recursive: true, mode: 0o700 });
+    await writeFile(unitPath, renderUserUnit(options.executable ?? process.execPath), { mode: 0o600 });
+    const reload = await run('systemctl', ['--user', 'daemon-reload']);
+    if (reload.code) throw new Error(reload.stderr || 'systemctl daemon-reload failed');
+    context.stdout(`Installed ${unitPath}\nFor operation after logout, enable user lingering with: loginctl enable-linger ${process.env.USER ?? '<user>'}\n`);
+    return 0;
+  }
+  const result = await run('systemctl', ['--user', verb, 'vian.service']);
+  if (result.code) throw new Error(result.stderr || `systemctl ${verb} failed`);
+  context.stdout(result.stdout || `Service ${verb} completed\n`);
+  return 0;
+}
