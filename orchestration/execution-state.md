@@ -2,7 +2,7 @@
 
 | Agent | Status | Branch/worktree | Commit | Validation evidence | Integrated revision | Blocker |
 |---|---|---|---|---|---|---|
-| F | integrated | codex/vian-foundation `/home/jc/dev/personal/vian-f` | 669f254 | frozen install, typecheck, 17 tests, build, smoke; combined check pass | 30787cb | — |
+| F | integrated | codex/vian-foundation `/home/jc/dev/personal/vian-f` | 08775f5 | frozen install, typecheck, 17 tests, build, smoke; combined check pass | 1d3e173 | — |
 | S | running | codex/vian-storage `/home/jc/dev/personal/vian-storage` | — | — | — | — |
 | C | pending S | — | — | — | — | — |
 | T | pending S | — | — | — | — | — |
