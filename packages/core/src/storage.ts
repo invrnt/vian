@@ -32,6 +32,10 @@ export interface BotStore extends ActionPort {
   /** Trusted reverse lookup of the active nonrevoked destination binding. */
   destinationForConversation(conversationId: ConversationId): Promise<ExternalDestination | undefined>;
   createPairing(actor: ExternalActor, expiresAt: string): Promise<string>;
+  /** Privileged local-owner read: unused, unexpired codes ordered by expiry. Never expose via model, Gate, audit or general list output. */
+  listPendingPairings(): Promise<Array<{ code: string; actor: ExternalActor; expiresAt: string }>>;
+  /** Active, unrevoked actor bindings for local-owner access management. */
+  listActorBindings(): Promise<Array<{ actor: ExternalActor; principalId: PrincipalId; isAdministrator: boolean; createdAt: string }>>;
   /** For an unaccepted unknown private message only: dedupe by Gate event ID, create/reuse one unexpired actor code, and persist plain system notice plus outbox atomically. No principal, session or model access. */
   createPairingNotice(event: InboundEvent, expiresAt: string): Promise<StorageOutcome<void>>;
   approvePairing(code: string, principalId: PrincipalId): Promise<StorageOutcome<void>>;
@@ -49,8 +53,8 @@ export interface BotStore extends ActionPort {
   beginRun(runId: RunId, input: InboxRecord, initiator: PrincipalId): Promise<StorageOutcome<void>>;
   transitionTool(callId: ToolCallId, runId: RunId, state: 'pending' | 'started' | 'succeeded' | 'failed' | 'interrupted', audit: Record<string, unknown>): Promise<StorageOutcome<void>>;
   completeRun(runId: RunId, finalMessage: CanonicalMessage, parts: OutboxPart[]): Promise<StorageOutcome<void>>;
-  /** Terminal transition and safe audit without creating a fictitious assistant final. */
-  finishRun(runId: RunId, state: 'failed' | 'cancelled', audit: Record<string, unknown>): Promise<StorageOutcome<void>>;
+  /** Terminal transition and safe audit. Only failed runs may include a safe assistant final and queued outbox parts, atomically linked to the run; cancellation remains silent. Parts require a final message. */
+  finishRun(runId: RunId, state: 'failed' | 'cancelled', audit: Record<string, unknown>, finalMessage?: CanonicalMessage, parts?: OutboxPart[]): Promise<StorageOutcome<void>>;
   updateDelivery(partId: string, state: DeliveryState, details?: Record<string, unknown>): Promise<StorageOutcome<void>>;
   listDeliveries(destination?: ExternalDestination): Promise<OutboxPart[]>;
   appendSummary(sessionId: SessionId, text: string, throughSequence: number): Promise<void>;
