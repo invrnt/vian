@@ -11,7 +11,7 @@ export class FakeGate implements GateAdapter {
   async start(onInbound: (event: InboundEvent) => Promise<void>): Promise<void> { this.inbound = onInbound; }
   async stop(): Promise<void> { this.inbound = undefined; }
   async emit(event: InboundEvent): Promise<void> { if (!this.inbound) throw new Error('Gate not started'); await this.inbound(event); }
-  async render(message: CanonicalMessage): Promise<RenderedPart[]> { return message.parts.map((p, partIndex) => p.type==='text' ? {partIndex,kind:'text',text:p.text} : {partIndex,kind:'file',attachment:{id:p.attachmentId,name:p.name??'file',mimeType:p.mimeType??'application/octet-stream',size:0}}); }
+  async render(message: CanonicalMessage): Promise<RenderedPart[]> { return message.parts.map((p, partIndex) => p.type==='text' ? {partIndex,kind:'text',text:p.text} : p.type==='interaction' ? {partIndex,kind:'text',text:p.label} : {partIndex,kind:'file',attachment:{id:p.attachmentId,name:p.name??'file',mimeType:p.mimeType??'application/octet-stream',size:0}}); }
   async deliver(part: RenderedPart, destination: ExternalDestination): Promise<DeliveryOutcome> { this.deliveries.push({part,destination}); return {kind:'succeeded',receipt:{externalId:String(this.deliveries.length),sentAt:new Date().toISOString()}}; }
 }
 export { MockLanguageModelV4 };
