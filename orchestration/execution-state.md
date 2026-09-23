@@ -7,7 +7,7 @@
 | C | pending S | — | — | — | — | — |
 | T | pending S | — | — | — | — | — |
 | R | pending S | — | — | — | — | — |
-| P | running | codex/vian-providers `/home/jc/dev/personal/vian-providers` | — | — | — | — |
+| P | partial integrated; blocked | codex/vian-providers `/home/jc/dev/personal/vian-providers` | 411560b | frozen install, typecheck, 17 offline tests; combined pass | 91e9263 | V027 supported OAuth client/transport and live validation unavailable |
 | G | running | codex/vian-telegram `/home/jc/dev/personal/vian-telegram` | — | — | — | — |
 | O | pending C,T,R,P,G | — | — | — | — | — |
 | H | pending O | — | — | — | — | — |
