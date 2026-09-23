@@ -3,6 +3,8 @@ set -euo pipefail
 ./dist/vian --help > /dev/null
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
+result=$(XDG_DATA_HOME="$fixture/data" ./dist/vian list --json)
+test "$result" = '{"ok":true,"data":[]}'
 cat > "$fixture/local.ts" <<'TS'
 export const value = 'local-import-ok';
 TS
