@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
-import type { BotId, PrincipalId, ConversationId, RunId, ToolCallId, EventId, MessageId, InboundEvent, CanonicalMessage, OutboxPart } from '@vian/core';
-import { SqliteRegistry, SqliteBotStore } from './index.ts';
+import type { BotId, PrincipalId, ConversationId, RunId, ToolCallId, EventId, MessageId, AttachmentId, InboundEvent, CanonicalMessage, OutboxPart } from '@vian/core';
+import { SqliteRegistry, SqliteBotStore, inspectBotSchema } from './index.ts';
 
 const botId = '00000000-0000-4000-8000-000000000001' as BotId;
 const principalId = 'alice' as PrincipalId;
@@ -201,12 +201,69 @@ test('attachment private path remains privileged and expiry keeps metadata', asy
     const id = 'attachment-1' as any;
     const publicPart = { id, name: 'report.pdf', mimeType: 'application/pdf', size: 4 };
     const privatePath = join(f.dir, 'private-report.pdf');
-    await f.store.registerAttachment(publicPart, privatePath, '2000-01-01T00:00:00.000Z');
+    const metadata = { sha256: 'a'.repeat(64), origin: 'generated' as const, createdAt: '1999-12-31T00:00:00.000Z' };
+    await f.store.registerAttachment(publicPart, privatePath, '2000-01-01T00:00:00.000Z', metadata);
     expect(await f.store.getAttachment(id)).toBeUndefined();
-    expect(await f.store.getAttachmentStorage(id)).toEqual({ public: publicPart, privatePath, expiresAt: '2000-01-01T00:00:00.000Z', status: 'expired' });
+    expect(await f.store.getAttachmentStorage(id)).toEqual({ public: publicPart, privatePath, expiresAt: '2000-01-01T00:00:00.000Z', status: 'expired', metadata });
     expect(await f.store.listExpiredAttachments(new Date().toISOString())).toEqual([{ id, privatePath }]);
     await f.store.markAttachmentDeleted(id);
     expect((await f.store.getAttachmentStorage(id))?.status).toBe('deleted');
     expect(await f.store.listExpiredAttachments(new Date().toISOString())).toEqual([]);
+  } finally { f.cleanup(); }
+});
+
+test('read-only schema inspection and additive attachment migration preserve legacy rows', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vian-schema-'));
+  const path = join(dir, 'state.sqlite');
+  try {
+    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 2, compatible: false });
+    const db = new Database(path);
+    const { botMigrations } = await import('./schema.ts');
+    db.run(botMigrations[0]); db.run('PRAGMA user_version=1');
+    const publicPart = { id: 'old' as AttachmentId, name: 'old.txt', mimeType: 'text/plain', size: 3 };
+    db.query('INSERT INTO attachments(id,public_json,private_path,expires_at) VALUES (?,?,?,?)').run('old', JSON.stringify(publicPart), '/tmp/old', '2099-01-01T00:00:00.000Z');
+    db.close();
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 2, compatible: true });
+    const store = new SqliteBotStore(botId, path);
+    expect(await store.getAttachmentStorage('old' as any)).toEqual({ public: publicPart, privatePath: '/tmp/old', expiresAt: '2099-01-01T00:00:00.000Z', status: 'available' });
+    store.close();
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 2, supportedVersion: 2, compatible: true });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('session listing, run terminal audit, authority and /new ordering', async () => {
+  const f = fixture();
+  try {
+    const sessionId = await ready(f.store);
+    expect(await f.store.destinationForConversation(conversationId)).toEqual(destination);
+    const before = await f.store.acceptInbound(event('one'));
+    const reset = await f.store.acceptInbound({ ...event('reset'), kind: 'control', control: 'new' });
+    await f.store.acceptInbound(event('after'));
+    if (before.kind !== 'ok' || reset.kind !== 'ok') throw new Error('inbound failed');
+    await f.store.appendResetBarrier(conversationId, principalId, reset.value.id);
+    expect(await f.store.listReadySessions()).toEqual([sessionId]);
+    const first = await f.store.claimNext(sessionId, 'owner', new Date(Date.now()+60000).toISOString());
+    if (first.kind !== 'ok' || !first.value) throw new Error('claim failed');
+    const runId = 'failed-run' as RunId;
+    expect((await f.store.beginRun(runId, first.value, principalId)).kind).toBe('ok');
+    expect((await f.store.finishRun(runId, 'failed', { safeMessage: 'provider unavailable' })).kind).toBe('ok');
+    expect((await f.store.finishRun(runId, 'cancelled', {})).kind).toBe('invalid-transition');
+    await f.store.releaseLease({ sessionId, holder: 'owner', expiresAt: '' });
+    const barrier = await f.store.claimNext(sessionId, 'owner', new Date(Date.now()+60000).toISOString());
+    expect(barrier.kind === 'ok' && barrier.value?.id).toBe(reset.value.id);
+    const barrierAgain = await f.store.claimNext(sessionId, 'owner', new Date(Date.now()+60000).toISOString());
+    expect(barrierAgain.kind === 'ok' && barrierAgain.value?.id).toBe(reset.value.id);
+    const newSession = await f.store.applyResetBarrier(conversationId, reset.value.id);
+    expect(newSession.kind).toBe('ok');
+    if (newSession.kind !== 'ok') throw new Error('reset failed');
+    const sessions = await f.store.listSessions();
+    expect(sessions.find(s => s.id === newSession.value)?.state).toBe('active');
+    expect(sessions.find(s => s.id === sessionId)?.state).toBe('inactive');
+    expect(sessions.find(s => s.id === sessionId)?.messageCount).toBe(1);
+    expect((await f.store.controlAuthority(conversationId, principalId))?.sessionInitiatorId).toBe(principalId);
+    expect(await f.store.listReadySessions()).toEqual([newSession.value]);
+    const events = [];
+    for await (const e of f.store.history({ sessionId })) events.push(e.kind);
+    expect(events).toContain('run_failed');
   } finally { f.cleanup(); }
 });
