@@ -74,6 +74,9 @@
         "@ai-sdk/provider": "4.0.17",
         "@vian/core": "workspace:*",
       },
+      "devDependencies": {
+        "@vian/credentials": "workspace:*",
+      },
     },
     "packages/provider-vercel": {
       "name": "@vian/provider-vercel",
