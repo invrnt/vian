@@ -32,9 +32,13 @@ export interface BotStore extends ActionPort {
   /** Trusted reverse lookup of the active nonrevoked destination binding. */
   destinationForConversation(conversationId: ConversationId): Promise<ExternalDestination | undefined>;
   createPairing(actor: ExternalActor, expiresAt: string): Promise<string>;
+  /** For an unaccepted unknown private message only: dedupe by Gate event ID, create/reuse one unexpired actor code, and persist plain system notice plus outbox atomically. No principal, session or model access. */
+  createPairingNotice(event: InboundEvent, expiresAt: string): Promise<StorageOutcome<void>>;
   approvePairing(code: string, principalId: PrincipalId): Promise<StorageOutcome<void>>;
   revokeBinding(actor: ExternalActor): Promise<void>;
   acceptInbound(event: InboundEvent): Promise<StorageOutcome<InboxRecord>>;
+  /** After authorization recheck, consume only queued/claimed input and append inbound_rejected audit in one transaction; lease release remains caller-owned. */
+  rejectInbound(inboundId: EventId, reason: string): Promise<StorageOutcome<void>>;
   claimNext(sessionId: SessionId, holder: string, leaseUntil: string): Promise<StorageOutcome<InboxRecord | undefined>>;
   claimSteeringBatch(runId: RunId, sessionId: SessionId, max: number): Promise<SteeringBatch>;
   appendResetBarrier(conversationId: ConversationId, actor: PrincipalId, inboundId: EventId): Promise<void>;
