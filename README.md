@@ -6,14 +6,13 @@ Coding agents working with Vian should follow the short [usage skill](skill.md).
 
 ## Install
 
-Prebuilt Linux x64 and arm64 binaries need no Bun or source build. The installer verifies the release checksum and places `vian` in `~/.local/bin` (or the directory given by `--dir`). This repository is currently private, so authorized users need GitHub CLI access:
+Prebuilt Linux x64 and arm64 binaries need no Bun or source build. The installer verifies the release checksum and places `vian` in `~/.local/bin` (or the directory given by `--dir`):
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' repos/invrnt/vian/contents/install.sh > install-vian.sh
-sh install-vian.sh --version v0.1.0-preview.1
+curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.1
 ```
 
-The preview release has not passed every live release gate; see the [release report](orchestration/release-report.md). Once the repository is public, `install.sh` can be fetched without `gh`. A stable release can be installed without `--version`.
+The preview release has not passed every live release gate; see the [release report](orchestration/release-report.md). A stable release can be installed without `--version`.
 
 ## First bot
 

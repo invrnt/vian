@@ -10,9 +10,8 @@ usage() {
   cat <<'EOF'
 Usage: sh install.sh [--version TAG] [--dir DIRECTORY] [--repo OWNER/REPO]
 
-Install a prebuilt Vian binary in ~/.local/bin by default. For a private
-repository, authenticate with gh first. Use --dir /usr/local/bin with the
-necessary filesystem permissions for a system-wide installation.
+Install a prebuilt Vian binary in ~/.local/bin by default. Use --dir
+/usr/local/bin with the necessary permissions for a system-wide install.
 EOF
 }
 
@@ -80,7 +79,7 @@ if [ -z "$base_url" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/n
     gh release download "$version" -R "$repo" -p "$asset" -p SHA256SUMS -D "$temp_dir" || die 'release download failed'
   fi
 else
-  command -v curl >/dev/null 2>&1 || die 'curl is required (or authenticate with gh for a private repository)'
+  command -v curl >/dev/null 2>&1 || die 'curl or authenticated gh is required'
   curl --fail --location --silent --show-error --retry 3 "$download_url/$asset" --output "$temp_dir/$asset" || die 'binary download failed'
   curl --fail --location --silent --show-error --retry 3 "$download_url/SHA256SUMS" --output "$temp_dir/SHA256SUMS" || die 'checksum download failed'
 fi
