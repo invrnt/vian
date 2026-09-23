@@ -3,6 +3,7 @@ export * from './messages.ts';
 export * from './config.ts';
 export * from './commands.ts';
 export * from './attachments.ts';
+export * from './actions.ts';
 export * from './tools.ts';
 export * from './secrets.ts';
 export * from './provider.ts';

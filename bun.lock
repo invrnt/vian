@@ -22,11 +22,17 @@
       "version": "0.1.0",
       "dependencies": {
         "@vian/core": "workspace:*",
+        "@vian/credentials": "workspace:*",
+        "@vian/provider-openai-chatgpt": "workspace:*",
+        "@vian/storage": "workspace:*",
       },
     },
     "packages/core": {
       "name": "@vian/core",
       "version": "0.1.0",
+      "dependencies": {
+        "zod": "4.6.5",
+      },
     },
     "packages/credentials": {
       "name": "@vian/credentials",
@@ -40,12 +46,14 @@
       "version": "0.1.0",
       "dependencies": {
         "@vian/core": "workspace:*",
+        "grammy": "1.46.0",
       },
     },
     "packages/mcp": {
       "name": "@vian/mcp",
       "version": "0.1.0",
       "dependencies": {
+        "@ai-sdk/mcp": "2.0.55",
         "@vian/core": "workspace:*",
       },
     },
@@ -53,6 +61,7 @@
       "name": "@vian/provider-google",
       "version": "0.1.0",
       "dependencies": {
+        "@ai-sdk/google": "4.0.77",
         "@vian/core": "workspace:*",
       },
     },
@@ -67,6 +76,7 @@
       "name": "@vian/provider-vercel",
       "version": "0.1.0",
       "dependencies": {
+        "@ai-sdk/gateway": "4.0.89",
         "@vian/core": "workspace:*",
       },
     },
@@ -75,6 +85,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@vian/core": "workspace:*",
+        "ai": "7.0.111",
       },
     },
     "packages/storage": {
@@ -89,6 +100,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@vian/core": "workspace:*",
+        "ai": "7.0.111",
       },
     },
     "packages/tools": {

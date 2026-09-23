@@ -4,13 +4,20 @@ import type { InboundEvent, AuditEvent, CanonicalMessage } from './messages.ts';
 import type { PublicAttachment } from './attachments.ts';
 import type { OutboxPart, DeliveryState } from './delivery.ts';
 import type { SteeringBatch } from './execution.ts';
+import type { ActionPort } from './actions.ts';
 export type StorageOutcome<T> = { kind: 'ok'; value: T } | { kind: 'duplicate' | 'lease-busy' | 'invalid-transition' | 'unavailable-storage'; reason: string };
 export interface RegistryRecord { id: BotId; alias: string; path: string; registeredAt: string; enabled: boolean; observedName?: string; observedStatus?: string }
 export interface RegistryStore { register(record: RegistryRecord, mode?: 'new' | 'move' | 'clone'): Promise<StorageOutcome<RegistryRecord>>; unregister(botId: BotId): Promise<void>; list(): Promise<RegistryRecord[]>; get(selector: string): Promise<RegistryRecord | undefined>; setEnabled(botId: BotId, enabled: boolean): Promise<void> }
 export interface InboxRecord { id: EventId; botId: BotId; event: InboundEvent; sequence: number; acceptedAt: string; messageId?: MessageId; sessionId?: SessionId }
 export interface SessionLease { sessionId: SessionId; holder: string; expiresAt: string }
 export interface HistoryFilter { sessionId?: SessionId; principalId?: PrincipalId; since?: string; toolsOnly?: boolean; afterSequence?: number; limit?: number }
-export interface BotStore {
+export interface BotStore extends ActionPort {
+  bindActor(actor: ExternalActor, principalId: PrincipalId): Promise<void>;
+  bindDestination(destination: ExternalDestination, conversationId: ConversationId, initiatorId: PrincipalId): Promise<SessionId>;
+  setAdministrator(principalId: PrincipalId, enabled: boolean): Promise<void>;
+  appendAudit(event: Omit<AuditEvent, 'sequence'>): Promise<number>;
+  recoverInterrupted(): Promise<number>;
+  readPendingInbound(sessionId: SessionId): Promise<InboxRecord[]>;
   resolveActor(actor: ExternalActor): Promise<PrincipalId | undefined>;
   resolveDestination(destination: ExternalDestination, principalId: PrincipalId): Promise<AuthorizedContext | undefined>;
   createPairing(actor: ExternalActor, expiresAt: string): Promise<string>;

@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@vian/core": "workspace:*",
-    "@vian/storage": "workspace:*"
+    "@vian/storage": "workspace:*",
+    "@vian/credentials": "workspace:*",
+    "@vian/provider-openai-chatgpt": "workspace:*"
   }
 }
