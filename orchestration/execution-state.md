@@ -9,5 +9,5 @@
 | R | integrated | codex/vian-runtime `/home/jc/dev/personal/vian-runtime` | 6477315 | frozen install, typecheck, 24 runtime tests; 86 combined tests | 9d0639f | — |
 | P | integrated; live provider checked | codex/vian-subscription `/home/jc/dev/personal/vian-subscription` | 36e40e5 | 97 offline tests; live gpt-5.5 SSE, tool, abort, error, refresh, two roots; combined typecheck | 98c20a0 | full runtime/Gate journey belongs to O/H |
 | G | integrated | codex/vian-telegram `/home/jc/dev/personal/vian-telegram` | 39a2016 | typecheck, 12 HTTP fixture tests, 43 assertions; combined typecheck pass | 75e8226 | live Telegram checks unavailable |
-| O | running | codex/vian-operations `/home/jc/dev/personal/vian-operations` | — | — | — | — |
-| H | pending O | — | — | — | — | — |
+| O | integrated | codex/vian-operations `/home/jc/dev/personal/vian-operations` | 1ac8410 | 105 combined tests; build/smoke; §67; live gpt-5.5 tool/steering/stop/shared bots; V009 medians | 6e2bb35 | Telegram, installed service, 25 live bots unverified |
+| H | running | codex/vian-hardening `/home/jc/dev/personal/vian-hardening` | — | — | — | — |
