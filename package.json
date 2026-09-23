@@ -10,7 +10,7 @@
     "check": "bun run typecheck && bun test",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build packages/cli/src/main.ts --compile --outfile dist/vian",
+    "build": "bun build packages/cli/src/main.ts --compile --minify --bytecode --outfile dist/vian",
     "schema": "bun scripts/generate-schema.ts",
     "test:foundation": "bun test packages/core packages/testing packages/cli",
     "smoke:foundation": "bash scripts/foundation-smoke.sh"
