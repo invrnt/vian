@@ -342,3 +342,62 @@ test('session listing, run terminal audit, authority and /new ordering', async (
     expect(events).toContain('run_failed');
   } finally { f.cleanup(); }
 });
+
+test('failed run persists safe final and outbox atomically, cancellation remains silent', async () => {
+  const f = fixture();
+  try {
+    const sessionId = await ready(f.store);
+    const accepted = await f.store.acceptInbound(event('provider-failure'));
+    if (accepted.kind !== 'ok') throw new Error('accept failed');
+    const claim = await f.store.claimNext(sessionId, 'owner', new Date(Date.now()+60000).toISOString());
+    if (claim.kind !== 'ok' || !claim.value) throw new Error('claim failed');
+    const runId = 'error-run' as RunId;
+    await f.store.beginRun(runId, claim.value, principalId);
+    const finalMessage: CanonicalMessage = { id: 'safe-error' as MessageId, botId, conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: 'The provider is temporarily unavailable.' }], createdAt: new Date().toISOString() };
+    const part: OutboxPart = { id: 'error-part', botId, messageId: finalMessage.id, destination, part: { partIndex: 0, kind: 'text', text: 'The provider is temporarily unavailable.' }, state: 'queued', attempt: 0 };
+    expect((await f.store.finishRun(runId, 'cancelled', {}, finalMessage, [part])).kind).toBe('invalid-transition');
+    await expect(f.store.finishRun(runId, 'failed', { safeType: 'provider' }, finalMessage, [part, part])).rejects.toThrow();
+    expect(await f.store.listDeliveries()).toEqual([]);
+    expect((await f.store.finishRun(runId, 'failed', { safeType: 'provider' }, finalMessage, [part])).kind).toBe('ok');
+    expect((await f.store.listDeliveries()).map(p => p.id)).toEqual([part.id]);
+    const history = [];
+    for await (const row of f.store.history({ sessionId })) history.push(row.kind);
+    expect(history).toContain('assistant_message');
+    expect(history).toContain('delivery_queued');
+    expect(history).toContain('run_failed');
+    expect(history).not.toContain('run_completed');
+  } finally { f.cleanup(); }
+});
+
+test('owner access listings include pending codes and only active bindings', async () => {
+  const f = fixture();
+  try {
+    const code = await f.store.createPairing(actor, new Date(Date.now()+60000).toISOString());
+    const pending = await f.store.listPendingPairings();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.code).toBe(code);
+    expect(pending[0]?.actor).toEqual(actor);
+    expect(await f.store.listActorBindings()).toEqual([]);
+    expect((await f.store.approvePairing(code, principalId)).kind).toBe('ok');
+    expect(await f.store.listPendingPairings()).toEqual([]);
+    const privateDestination = { gate: actor.gate, externalId: actor.externalId };
+    const context = await f.store.resolveDestination(privateDestination, principalId);
+    expect(context?.principalId).toBe(principalId);
+    expect(context?.conversationId).toBeDefined();
+    expect(context?.sessionId).toBeDefined();
+    await f.store.setAdministrator(principalId, true);
+    const bindings = await f.store.listActorBindings();
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]?.actor).toEqual(actor);
+    expect(bindings[0]?.principalId).toBe(principalId);
+    expect(bindings[0]?.isAdministrator).toBe(true);
+    await f.store.revokeBinding(actor);
+    expect(await f.store.listActorBindings()).toEqual([]);
+    const replacement = 'bob' as PrincipalId;
+    const nextCode = await f.store.createPairing(actor, new Date(Date.now()+60000).toISOString());
+    expect((await f.store.approvePairing(nextCode, replacement)).kind).toBe('ok');
+    const nextContext = await f.store.resolveDestination(privateDestination, replacement);
+    expect(nextContext?.principalId).toBe(replacement);
+    expect(nextContext?.conversationId).not.toBe(context?.conversationId);
+  } finally { f.cleanup(); }
+});

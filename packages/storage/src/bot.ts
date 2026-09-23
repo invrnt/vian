@@ -82,6 +82,14 @@ export class SqliteBotStore implements BotStore {
     this.db.query('INSERT INTO pairing_requests(code,gate,external_id,expires_at) VALUES (?,?,?,?)').run(code, actor.gate, actor.externalId, expiresAt);
     return code;
   }
+  async listPendingPairings(): Promise<Array<{ code: string; actor: ExternalActor; expiresAt: string }>> {
+    return (this.db.query('SELECT code,gate,external_id,expires_at FROM pairing_requests WHERE used_at IS NULL AND expires_at>? ORDER BY expires_at,code').all(now()) as { code: string; gate: ExternalActor['gate']; external_id: string; expires_at: string }[]).map(row => ({ code: row.code, actor: { gate: row.gate, externalId: row.external_id }, expiresAt: row.expires_at }));
+  }
+  async listActorBindings(): Promise<Array<{ actor: ExternalActor; principalId: PrincipalId; isAdministrator: boolean; createdAt: string }>> {
+    return (this.db.query(`SELECT b.gate,b.external_id,b.principal_id,b.created_at,p.is_admin
+      FROM actor_bindings b JOIN principals p ON p.id=b.principal_id
+      WHERE b.revoked_at IS NULL ORDER BY b.created_at,b.gate,b.external_id`).all() as { gate: ExternalActor['gate']; external_id: string; principal_id: PrincipalId; created_at: string; is_admin: number }[]).map(row => ({ actor: { gate: row.gate, externalId: row.external_id }, principalId: row.principal_id, isAdministrator: !!row.is_admin, createdAt: row.created_at }));
+  }
   private nextDeliverySequence(): number {
     this.db.query('INSERT INTO delivery_order DEFAULT VALUES').run();
     return Number((this.db.query('SELECT last_insert_rowid() id').get() as { id: number }).id);
@@ -111,6 +119,21 @@ export class SqliteBotStore implements BotStore {
       this.db.query('UPDATE pairing_requests SET used_at=? WHERE code=?').run(now(), code);
       this.db.query('INSERT OR IGNORE INTO principals(id) VALUES (?)').run(principalId);
       this.db.query('INSERT INTO actor_bindings(gate,external_id,principal_id,created_at,revoked_at) VALUES (?,?,?,?,NULL) ON CONFLICT(gate,external_id) DO UPDATE SET principal_id=excluded.principal_id,revoked_at=NULL').run(row.gate, row.external_id, principalId, now());
+      const privateBinding = this.db.query(`SELECT d.conversation_id,c.initiator_id FROM destination_bindings d
+        JOIN conversations c ON c.id=d.conversation_id
+        WHERE d.gate=? AND d.external_id=? AND d.thread_id=''`).get(row.gate, row.external_id) as { conversation_id: ConversationId; initiator_id: PrincipalId } | null;
+      if (!privateBinding || privateBinding.initiator_id !== principalId) {
+        const conversationId = randomUUID() as ConversationId;
+        const sessionId = randomUUID() as SessionId;
+        this.db.query('INSERT INTO conversations(id,initiator_id,active_session_id,created_at) VALUES (?,?,?,?)').run(conversationId, principalId, sessionId, now());
+        this.db.query('INSERT INTO sessions(id,conversation_id,initiator_id,created_at) VALUES (?,?,?,?)').run(sessionId, conversationId, principalId, now());
+        this.db.query(`INSERT INTO destination_bindings(gate,external_id,thread_id,conversation_id,created_at,revoked_at)
+          VALUES (?,?,?,?,?,NULL) ON CONFLICT(gate,external_id,thread_id)
+          DO UPDATE SET conversation_id=excluded.conversation_id,created_at=excluded.created_at,revoked_at=NULL`).run(row.gate, row.external_id, '', conversationId, now());
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId, sessionId, principalId, kind: 'conversation_created', at: now(), payload: {} });
+      } else {
+        this.db.query("UPDATE destination_bindings SET revoked_at=NULL WHERE gate=? AND external_id=? AND thread_id=''").run(row.gate, row.external_id);
+      }
       for (const notice of this.db.query("SELECT id,part_json FROM pairing_notices WHERE code=? AND state IN ('queued','failed-retryable')").all(code) as { id: string; part_json: string }[]) {
         const part = JSON.parse(notice.part_json) as OutboxPart;
         part.state = 'failed-terminal'; part.safeError = 'Pairing code was approved';
@@ -301,14 +324,25 @@ export class SqliteBotStore implements BotStore {
       return ok(undefined);
     }).immediate();
   }
-  async finishRun(runId: RunId, state: 'failed' | 'cancelled', audit: Record<string, unknown>): Promise<StorageOutcome<void>> {
+  async finishRun(runId: RunId, state: 'failed' | 'cancelled', audit: Record<string, unknown>, finalMessage?: CanonicalMessage, parts: OutboxPart[] = []): Promise<StorageOutcome<void>> {
     return this.db.transaction(() => {
       const row = this.db.query(`SELECT r.state,r.session_id,r.initiator_id,s.conversation_id
         FROM runs r JOIN sessions s ON s.id=r.session_id WHERE r.id=?`).get(runId) as { state: string; session_id: SessionId; initiator_id: PrincipalId; conversation_id: ConversationId } | null;
       if (!row || row.state !== 'running') return invalid('Run is not active');
+      if ((state === 'cancelled' && finalMessage) || (!finalMessage && parts.length)) return invalid('Only a failed run can persist a final message with parts');
+      if (finalMessage && (finalMessage.role !== 'assistant' || finalMessage.botId !== this.botId || finalMessage.runId !== runId || finalMessage.sessionId !== row.session_id || finalMessage.conversationId !== row.conversation_id)) return invalid('Failed final message does not match its run');
       for (const tool of this.db.query("SELECT id FROM tool_calls WHERE run_id=? AND state='started'").all(runId) as { id: ToolCallId }[]) {
         this.db.query("UPDATE tool_calls SET state='interrupted',ended_at=? WHERE id=?").run(now(), tool.id);
         this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, principalId: row.initiator_id, kind: 'tool_call_interrupted', at: now(), payload: { callId: tool.id, possiblePartialExecution: true } });
+      }
+      if (finalMessage) {
+        this.db.query('INSERT INTO messages(id,conversation_id,session_id,run_id,role,message_json) VALUES (?,?,?,?,?,?)').run(finalMessage.id, finalMessage.conversationId, finalMessage.sessionId, runId, finalMessage.role, json(finalMessage));
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, kind: 'assistant_message', at: now(), payload: { message: finalMessage } });
+        for (const [ordinal, part] of parts.entries()) {
+          if (part.messageId !== finalMessage.id || part.botId !== this.botId || part.state !== 'queued') throw new Error('Outbox part/final message mismatch');
+          this.db.query('INSERT INTO outbox(id,message_id,destination_key,ordinal,part_json,state,attempt,next_attempt_at,delivery_sequence) VALUES (?,?,?,?,?,?,?,?,?)').run(part.id, finalMessage.id, key(part.destination), ordinal, json(part), part.state, part.attempt, part.nextAttemptAt ?? null, this.nextDeliverySequence());
+          this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, kind: 'delivery_queued', at: now(), payload: { partId: part.id, ordinal } });
+        }
       }
       this.db.query('UPDATE runs SET state=?,ended_at=? WHERE id=?').run(state, now(), runId);
       this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, principalId: row.initiator_id, kind: `run_${state}`, at: now(), payload: audit });
