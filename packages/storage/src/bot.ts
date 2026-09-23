@@ -4,7 +4,7 @@ import type { BotStore, StorageOutcome, RegistryRecord, InboxRecord, SessionLeas
 import type { BotId, PrincipalId, ConversationId, SessionId, RunId, ToolCallId, EventId, MessageId, AttachmentId, ActionId, ExternalActor, ExternalDestination, AuthorizedContext, CallbackActionInput, CallbackActionClaim, CallbackActionValue } from '@vian/core';
 import type { AuditEvent, InboundEvent, CanonicalMessage } from '@vian/core';
 import type { OutboxPart, DeliveryState } from '@vian/core';
-import type { PublicAttachment } from '@vian/core';
+import type { PublicAttachment, AttachmentMetadata, PrivilegedAttachmentRecord } from '@vian/core';
 import type { SteeringBatch } from '@vian/core';
 import { openDatabase, migrate, backup } from './sqlite.ts';
 import { botMigrations } from './schema.ts';
@@ -63,6 +63,11 @@ export class SqliteBotStore implements BotStore {
     const row = this.db.query(`SELECT c.id conversation_id,c.active_session_id session_id,p.is_admin FROM destination_bindings d JOIN conversations c ON c.id=d.conversation_id JOIN principals p ON p.id=? WHERE d.gate=? AND d.external_id=? AND d.thread_id=? AND d.revoked_at IS NULL`).get(principalId, destination.gate, destination.externalId, destination.threadId ?? '') as { conversation_id: ConversationId; session_id: SessionId; is_admin: number } | null;
     return row ? { botId: this.botId, principalId, conversationId: row.conversation_id, sessionId: row.session_id, destination, isAdministrator: !!row.is_admin } : undefined;
   }
+  async destinationForConversation(conversationId: ConversationId): Promise<ExternalDestination | undefined> {
+    const row = this.db.query(`SELECT gate,external_id,thread_id FROM destination_bindings
+      WHERE conversation_id=? AND revoked_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1`).get(conversationId) as { gate: ExternalDestination['gate']; external_id: string; thread_id: string } | null;
+    return row ? { gate: row.gate, externalId: row.external_id, ...(row.thread_id && { threadId: row.thread_id }) } : undefined;
+  }
   async createPairing(actor: ExternalActor, expiresAt: string): Promise<string> {
     const code = randomBytes(12).toString('base64url');
     this.db.query('INSERT INTO pairing_requests(code,gate,external_id,expires_at) VALUES (?,?,?,?)').run(code, actor.gate, actor.externalId, expiresAt);
@@ -93,6 +98,12 @@ export class SqliteBotStore implements BotStore {
       if (!principal) return invalid('Actor is not bound');
       const ctx = this.db.query(`SELECT c.id conversation_id,c.active_session_id session_id FROM destination_bindings d JOIN conversations c ON c.id=d.conversation_id WHERE d.gate=? AND d.external_id=? AND d.thread_id=? AND d.revoked_at IS NULL`).get(event.destination.gate, event.destination.externalId, event.destination.threadId ?? '') as { conversation_id: ConversationId; session_id: SessionId } | null;
       if (!ctx) return invalid('Destination is not bound');
+      if (event.kind === 'control' && event.control === 'new') {
+        const authority = this.db.query(`SELECT s.initiator_id, p.is_admin FROM sessions s
+          JOIN principals p ON p.id=? WHERE s.id=?`).get(principal.principal_id, ctx.session_id) as { initiator_id: PrincipalId; is_admin: number } | null;
+        const isShared = event.actor.externalId !== event.destination.externalId || !!event.destination.threadId;
+        if (!authority || (isShared && authority.initiator_id !== principal.principal_id && !authority.is_admin)) return invalid('Actor cannot reset this session');
+      }
       const id = randomUUID() as EventId, messageId = randomUUID() as MessageId;
       let acceptedEvent = event;
       if (event.kind === 'callback') {
@@ -106,20 +117,47 @@ export class SqliteBotStore implements BotStore {
       const sequence = Number((this.db.query('SELECT last_insert_rowid() AS id').get() as { id: number }).id);
       const record: InboxRecord = { id, botId: this.botId, event: acceptedEvent, sequence, acceptedAt: now(), messageId, sessionId: ctx.session_id };
       this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: ctx.conversation_id, sessionId: ctx.session_id, principalId: principal.principal_id, kind: 'inbound_message', at: record.acceptedAt, payload: { messageId, event: acceptedEvent } });
+      if (acceptedEvent.kind === 'control' && acceptedEvent.control === 'new') {
+        this.db.query('INSERT INTO reset_barriers(id,conversation_id,actor_id,inbox_sequence) VALUES (?,?,?,?)').run(id, ctx.conversation_id, principal.principal_id, sequence);
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: ctx.conversation_id, sessionId: ctx.session_id, principalId: principal.principal_id, kind: 'session_reset_requested', at: record.acceptedAt, payload: { inboundId: id, inboxSequence: sequence } });
+      }
       return ok(record);
     }).immediate();
   }
   private inbox(row: any): InboxRecord { return { id: row.id, botId: this.botId, event: JSON.parse(row.event_json), sequence: row.sequence, acceptedAt: row.accepted_at, messageId: row.message_id, sessionId: row.session_id }; }
   async readPendingInbound(sessionId: SessionId): Promise<InboxRecord[]> { return (this.db.query("SELECT * FROM inbox WHERE session_id=? AND state='queued' ORDER BY sequence").all(sessionId) as any[]).map(row => this.inbox(row)); }
+  async listReadySessions(): Promise<SessionId[]> {
+    return (this.db.query(`SELECT DISTINCT s.id FROM sessions s
+      JOIN inbox i ON i.session_id=s.id AND i.state!='consumed'
+      WHERE (s.lease_holder IS NULL OR s.lease_expires_at<=?)
+      AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.session_id=s.id AND r.state='running')
+      GROUP BY s.id ORDER BY MIN(i.sequence)`).all(now()) as { id: SessionId }[]).map(row => row.id);
+  }
+  async listSessions(): Promise<{ id: SessionId; conversationId: ConversationId; initiatorId: PrincipalId; createdAt: string; lastActiveAt: string; messageCount: number; state: 'active' | 'inactive' }[]> {
+    return (this.db.query(`SELECT s.id,s.conversation_id,s.initiator_id,s.created_at,
+      COALESCE((SELECT MAX(e.at) FROM events e WHERE e.session_id=s.id),s.created_at) last_active_at,
+      (SELECT COUNT(*) FROM messages m WHERE m.session_id=s.id) message_count,
+      CASE WHEN c.active_session_id=s.id THEN 'active' ELSE 'inactive' END state
+      FROM sessions s JOIN conversations c ON c.id=s.conversation_id ORDER BY last_active_at DESC,s.id`).all() as any[]).map(row => ({ id: row.id, conversationId: row.conversation_id, initiatorId: row.initiator_id, createdAt: row.created_at, lastActiveAt: row.last_active_at, messageCount: row.message_count, state: row.state }));
+  }
+  async controlAuthority(conversationId: ConversationId, principalId: PrincipalId): Promise<{ isAdministrator: boolean; sessionInitiatorId: PrincipalId; activeRunInitiatorId?: PrincipalId } | undefined> {
+    const row = this.db.query(`SELECT s.initiator_id session_initiator_id,
+      p.is_admin is_admin,
+      (SELECT initiator_id FROM runs WHERE session_id=s.id AND state='running' ORDER BY started_at DESC LIMIT 1) run_initiator_id
+      FROM conversations c JOIN sessions s ON s.id=c.active_session_id
+      JOIN principals p ON p.id=? WHERE c.id=?`).get(principalId, conversationId) as { session_initiator_id: PrincipalId; is_admin: number; run_initiator_id: PrincipalId | null } | null;
+    return row ? { isAdministrator: !!row.is_admin, sessionInitiatorId: row.session_initiator_id, ...(row.run_initiator_id && { activeRunInitiatorId: row.run_initiator_id }) } : undefined;
+  }
   async claimNext(sessionId: SessionId, holder: string, leaseUntil: string): Promise<StorageOutcome<InboxRecord | undefined>> {
     return this.db.transaction(() => {
       const lease = this.db.query('SELECT lease_holder,lease_expires_at FROM sessions WHERE id=?').get(sessionId) as { lease_holder: string | null; lease_expires_at: string | null } | null;
       if (!lease) return invalid('Unknown session');
       if (lease.lease_holder && lease.lease_holder !== holder && lease.lease_expires_at && lease.lease_expires_at > now()) return { kind: 'lease-busy' as const, reason: 'Session is leased' };
-      const row = this.db.query("SELECT * FROM inbox WHERE session_id=? AND state='queued' ORDER BY sequence LIMIT 1").get(sessionId) as any;
+      if (this.db.query("SELECT id FROM runs WHERE session_id=? AND state='running' LIMIT 1").get(sessionId)) return { kind: 'lease-busy' as const, reason: 'Session has an active run' };
+      const row = this.db.query("SELECT * FROM inbox WHERE session_id=? AND state!='consumed' ORDER BY sequence LIMIT 1").get(sessionId) as any;
       this.db.query('UPDATE sessions SET lease_holder=?,lease_expires_at=? WHERE id=?').run(holder, leaseUntil, sessionId);
       if (!row) return ok(undefined);
-      this.db.query("UPDATE inbox SET state='claimed' WHERE id=?").run(row.id);
+      if (row.state === 'queued') this.db.query("UPDATE inbox SET state='claimed' WHERE id=?").run(row.id);
       return ok(this.inbox(row));
     }).immediate();
   }
@@ -133,7 +171,7 @@ export class SqliteBotStore implements BotStore {
       let barrierReached = false;
       for (const row of rows) {
         const event = JSON.parse(row.event_json) as InboundEvent;
-        if (event.control === 'new') { barrierReached = true; break; }
+        if (event.kind !== 'message' || event.control) { barrierReached = true; break; }
         const principal = this.db.query('SELECT principal_id FROM actor_bindings WHERE gate=? AND external_id=? AND revoked_at IS NULL').get(event.actor.gate, event.actor.externalId) as { principal_id: PrincipalId } | null;
         if (!principal) {
           this.db.query("UPDATE inbox SET state='consumed' WHERE id=?").run(row.id);
@@ -154,6 +192,7 @@ export class SqliteBotStore implements BotStore {
     this.db.transaction(() => {
       const row = this.db.query('SELECT sequence FROM inbox WHERE id=?').get(inboundId) as { sequence: number } | null;
       if (!row) throw new Error('Reset inbound not found');
+      if (this.db.query('SELECT id FROM reset_barriers WHERE id=?').get(inboundId)) return;
       this.db.query('INSERT OR IGNORE INTO reset_barriers(id,conversation_id,actor_id,inbox_sequence) VALUES (?,?,?,?)').run(inboundId, conversationId, actor, row.sequence);
       this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId, principalId: actor, kind: 'session_reset_requested', at: now(), payload: { inboundId, inboxSequence: row.sequence } });
     }).immediate();
@@ -213,6 +252,20 @@ export class SqliteBotStore implements BotStore {
       const message: CanonicalMessage = { id: input.messageId!, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, principalId: initiator, runId, role: 'user', parts: input.event.parts ?? [], createdAt: input.acceptedAt };
       this.db.query('INSERT INTO messages(id,conversation_id,session_id,run_id,role,message_json) VALUES (?,?,?,?,?,?)').run(message.id, message.conversationId, message.sessionId, runId, message.role, json(message));
       this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, principalId: initiator, kind: 'run_started', at: now(), payload: { inputId: input.id, messageId: input.messageId } });
+      return ok(undefined);
+    }).immediate();
+  }
+  async finishRun(runId: RunId, state: 'failed' | 'cancelled', audit: Record<string, unknown>): Promise<StorageOutcome<void>> {
+    return this.db.transaction(() => {
+      const row = this.db.query(`SELECT r.state,r.session_id,r.initiator_id,s.conversation_id
+        FROM runs r JOIN sessions s ON s.id=r.session_id WHERE r.id=?`).get(runId) as { state: string; session_id: SessionId; initiator_id: PrincipalId; conversation_id: ConversationId } | null;
+      if (!row || row.state !== 'running') return invalid('Run is not active');
+      for (const tool of this.db.query("SELECT id FROM tool_calls WHERE run_id=? AND state='started'").all(runId) as { id: ToolCallId }[]) {
+        this.db.query("UPDATE tool_calls SET state='interrupted',ended_at=? WHERE id=?").run(now(), tool.id);
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, principalId: row.initiator_id, kind: 'tool_call_interrupted', at: now(), payload: { callId: tool.id, possiblePartialExecution: true } });
+      }
+      this.db.query('UPDATE runs SET state=?,ended_at=? WHERE id=?').run(state, now(), runId);
+      this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, runId, principalId: row.initiator_id, kind: `run_${state}`, at: now(), payload: audit });
       return ok(undefined);
     }).immediate();
   }
@@ -280,19 +333,21 @@ export class SqliteBotStore implements BotStore {
     const row = this.db.query('SELECT text,through_sequence FROM summaries WHERE session_id=?').get(sessionId) as { text: string; through_sequence: number } | null;
     return row ? { text: row.text, throughSequence: row.through_sequence } : undefined;
   }
-  async registerAttachment(attachment: PublicAttachment, privatePath: string, expiresAt: string): Promise<void> {
+  async registerAttachment(attachment: PublicAttachment, privatePath: string, expiresAt: string, metadata: AttachmentMetadata): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(metadata.sha256)) throw new Error('Attachment SHA-256 must be lowercase hex');
+    if (metadata.origin !== 'generated' && metadata.origin !== 'inbound') throw new Error('Unsupported attachment origin');
     this.db.transaction(() => {
-      this.db.query('INSERT INTO attachments(id,public_json,private_path,expires_at) VALUES (?,?,?,?)').run(attachment.id, json(attachment), privatePath, expiresAt);
-      this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'attachment_registered', at: now(), payload: { attachment } });
+      this.db.query('INSERT INTO attachments(id,public_json,private_path,expires_at,sha256,origin,created_at) VALUES (?,?,?,?,?,?,?)').run(attachment.id, json(attachment), privatePath, expiresAt, metadata.sha256, metadata.origin, metadata.createdAt);
+      this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'attachment_registered', at: now(), payload: { attachment, metadata } });
     }).immediate();
   }
   async getAttachment(id: AttachmentId): Promise<PublicAttachment | undefined> {
     const row = this.db.query("SELECT public_json FROM attachments WHERE id=? AND status='available' AND expires_at > ?").get(id, now()) as { public_json: string } | null;
     return row ? JSON.parse(row.public_json) : undefined;
   }
-  async getAttachmentStorage(id: AttachmentId): Promise<{ public: PublicAttachment; privatePath: string; expiresAt: string; status: 'available' | 'expired' | 'deleted' } | undefined> {
-    const row = this.db.query('SELECT public_json,private_path,expires_at,status FROM attachments WHERE id=?').get(id) as { public_json: string; private_path: string; expires_at: string; status: 'available' | 'expired' | 'deleted' } | null;
-    return row ? { public: JSON.parse(row.public_json), privatePath: row.private_path, expiresAt: row.expires_at, status: row.status === 'available' && row.expires_at <= now() ? 'expired' : row.status } : undefined;
+  async getAttachmentStorage(id: AttachmentId): Promise<PrivilegedAttachmentRecord | undefined> {
+    const row = this.db.query('SELECT public_json,private_path,expires_at,status,sha256,origin,created_at FROM attachments WHERE id=?').get(id) as { public_json: string; private_path: string; expires_at: string; status: 'available' | 'expired' | 'deleted'; sha256: string | null; origin: 'generated' | 'inbound' | null; created_at: string | null } | null;
+    return row ? { public: JSON.parse(row.public_json), privatePath: row.private_path, expiresAt: row.expires_at, status: row.status === 'available' && row.expires_at <= now() ? 'expired' : row.status, ...(row.sha256 && row.origin && row.created_at ? { metadata: { sha256: row.sha256, origin: row.origin, createdAt: row.created_at } } : {}) } : undefined;
   }
   async listExpiredAttachments(at: string): Promise<{ id: AttachmentId; privatePath: string }[]> {
     return (this.db.query("SELECT id,private_path FROM attachments WHERE expires_at<=? AND status!='deleted' ORDER BY expires_at").all(at) as { id: AttachmentId; private_path: string }[]).map(row => ({ id: row.id, privatePath: row.private_path }));

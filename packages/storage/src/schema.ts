@@ -98,4 +98,8 @@ CREATE TABLE callback_actions (
   destination_key TEXT NOT NULL, label TEXT NOT NULL, value_json TEXT NOT NULL,
   expires_at TEXT NOT NULL, consumed_at TEXT
 );
+`, `
+ALTER TABLE attachments ADD COLUMN sha256 TEXT;
+ALTER TABLE attachments ADD COLUMN origin TEXT;
+ALTER TABLE attachments ADD COLUMN created_at TEXT;
 `] as const;
