@@ -1,17 +1,14 @@
 import type { CredentialStore, ProviderAdapter } from '@vian/core';
+import { subscriptionModel } from './transport.ts';
+export { createAuthorization, acceptAuthorization, exchangeAuthorization, refreshAuthorization, activeSubscriptionTokens, saveSubscriptionTokens, waitForLoopback, SubscriptionAuthError } from './oauth.ts';
+export type { SubscriptionTokens, AuthorizationAttempt } from './oauth.ts';
 
-export class SubscriptionAuthUnavailable extends Error {
-  constructor() { super('ChatGPT subscription authentication requires a supported Vian OAuth client arrangement'); this.name = 'SubscriptionAuthUnavailable'; }
-}
-
-// Subscription payload and transport stay in this package. A login or model request
-// must never borrow another application's OAuth client registration or credentials.
-export function chatgptSubscriptionAdapter(_profiles: CredentialStore): ProviderAdapter {
+export function chatgptSubscriptionAdapter(profiles: CredentialStore, fetcher: typeof fetch = fetch): ProviderAdapter {
   return {
     id: 'openai-chatgpt',
-    async resolveModel({ credential }) {
+    async resolveModel({ credential, modelId }) {
       if (!credential?.startsWith('oauth:openai-chatgpt:')) throw new Error('ChatGPT subscription requires a global OAuth profile reference');
-      throw new SubscriptionAuthUnavailable();
+      return subscriptionModel(profiles, credential.slice('oauth:openai-chatgpt:'.length), modelId, fetcher);
     },
   };
 }
