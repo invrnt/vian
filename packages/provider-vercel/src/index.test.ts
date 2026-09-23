@@ -10,6 +10,9 @@ test('Gateway adapter uses explicit bot credential and preserves configured mode
   const model = await gatewayAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-b', modelId: 'vendor/custom', credential: 'env:AI_GATEWAY_API_KEY' });
   expect(typeof model === 'string' ? model : model.modelId).toBe('vendor/custom');
   expect(calls).toEqual(['/tmp/bot-b:env:AI_GATEWAY_API_KEY']);
+  await gatewayAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-a', modelId: 'vendor/custom', credential: 'profile:vercel-ai-gateway-default' });
+  expect(calls[1]).toBe('/tmp/bot-a:profile:vercel-ai-gateway-default');
+  await expect(gatewayAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-a', modelId: 'other', credential: 'profile:google-default' })).rejects.toThrow('credential reference');
   await expect(gatewayAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-b', modelId: 'other' })).rejects.toThrow('credential reference');
 });
 

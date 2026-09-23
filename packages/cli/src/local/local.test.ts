@@ -36,7 +36,8 @@ test('init preserves unrelated bytes, env values and gitignore across reruns', a
     const ignore = readFileSync(join(f.bot, '.gitignore'));
     const manifest = readFileSync(join(f.bot, 'vian.json'));
     expect(env.toString()).toContain('TELEGRAM_BOT_TOKEN=keep-this');
-    expect(env.toString()).toContain('GEMINI_API_KEY=');
+    expect(env.toString()).not.toContain('GEMINI_API_KEY=');
+    expect(JSON.parse(manifest.toString()).model.credential).toBe('profile:google-default');
     expect(readFileSync(join(f.bot, 'package.json'))).toEqual(packageBytes);
     expect(readFileSync(join(f.bot, 'VIAN.md'), 'utf8')).toBe('Custom rules\n');
     expect((await f.invoke(...args)).code).toBe(0);
@@ -54,6 +55,16 @@ test('interrupted temporary file does not corrupt a subsequent init', async () =
     expect(result.code).toBe(0);
     expect(JSON.parse(readFileSync(join(f.bot, 'vian.json'), 'utf8')).model.id).toBe('test-model');
     expect(readFileSync(join(f.bot, '.vian-interrupted.tmp'), 'utf8')).toBe('partial');
+  } finally { f.cleanup(); }
+});
+
+test('Gateway init selects the shared credential profile by default', async () => {
+  const f = fixture();
+  try {
+    expect((await f.invoke('init', f.bot, '--provider', 'vercel-ai-gateway', '--model', 'vendor/model', '--no-register')).code).toBe(0);
+    const manifest = JSON.parse(readFileSync(join(f.bot, 'vian.json'), 'utf8'));
+    expect(manifest.model.credential).toBe('profile:vercel-ai-gateway-default');
+    expect(readFileSync(join(f.bot, '.env'), 'utf8')).toBe('TELEGRAM_BOT_TOKEN=\n');
   } finally { f.cleanup(); }
 });
 
@@ -94,7 +105,7 @@ test('offline inspect exposes references and history/doctor errors remain script
     expect((await f.invoke('init', f.bot, '--model', 'test-model')).code).toBe(0);
     const inspected = await f.invoke('inspect', 'bot', '--json');
     expect(inspected.code).toBe(0);
-    expect(inspected.out).toContain('env:GEMINI_API_KEY');
+    expect(inspected.out).toContain('profile:google-default');
     expect(inspected.out).not.toContain('secret-value');
     const history = await f.invoke('history', 'bot', '--jsonl');
     expect(history.code).toBe(1);
@@ -172,7 +183,7 @@ test('history export redacts bot-local env secret values', async () => {
 test('offline doctor identifies missing local inputs, unsafe permissions and future database schema', async () => {
   const f = fixture();
   try {
-    expect((await f.invoke('init', f.bot, '--model', 'test-model')).code).toBe(0);
+    expect((await f.invoke('init', f.bot, '--model', 'test-model', '--credential', 'env:GEMINI_API_KEY')).code).toBe(0);
     const manifest = JSON.parse(readFileSync(join(f.bot, 'vian.json'), 'utf8'));
     const store = new SqliteBotStore(manifest.id as BotId, join(f.bot, '.vian/state.sqlite'));
     store.close();

@@ -1,34 +1,28 @@
 import type { CommandModule } from '@vian/core';
 import { FileCredentialStore } from '@vian/credentials';
 import { createAuthorization, exchangeAuthorization, saveSubscriptionTokens, waitForLoopback } from '@vian/provider-openai-chatgpt';
+import { readHiddenLine } from '../hidden-input.ts';
 
-function hiddenCallbackInput(signal: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const input = process.stdin;
-    if (!input.isTTY || !input.setRawMode) { reject(new Error('Manual callback requires an interactive terminal.')); return; }
-    let value = '';
-    const previous = input.isRaw;
-    const cleanup = () => { input.off('data', onData); signal.removeEventListener('abort', onAbort); input.setRawMode(previous ?? false); input.pause(); process.stderr.write('\n'); };
-    const onAbort = () => { cleanup(); reject(new Error('Manual login input cancelled.')); };
-    const onData = (chunk: Buffer) => {
-      for (const byte of chunk) {
-        if (byte === 3) { cleanup(); reject(new Error('Login cancelled.')); return; }
-        if (byte === 13 || byte === 10) { cleanup(); resolve(value); return; }
-        if (byte === 127) value = value.slice(0, -1);
-        else if (byte >= 32 && byte < 127 && value.length < 4096) value += String.fromCharCode(byte);
-      }
-    };
-    process.stderr.write('Paste the complete callback URL, or finish in your browser: ');
-    input.setRawMode(true); input.resume(); input.on('data', onData); signal.addEventListener('abort', onAbort, { once: true });
-  });
+type ApiKeyProvider = 'google' | 'vercel-ai-gateway';
+const apiKeyProviders = new Set<string>(['google', 'vercel-ai-gateway']);
+export function providerProfile(provider: string): string {
+  return provider === 'openai-chatgpt' ? 'default' : `${provider}-default`;
+}
+
+export async function saveProviderApiKey(store: FileCredentialStore, provider: ApiKeyProvider, key: string): Promise<void> {
+  if (!key || /\s/.test(key) || key.length > 4096) throw new Error('Provider API key is empty or malformed.');
+  const name = providerProfile(provider);
+  await store.withProfileLock(name, () => store.replace(name, new TextEncoder().encode(key), {
+    name, provider, status: 'ready', updatedAt: new Date().toISOString(),
+  }));
 }
 
 export const authCommand: CommandModule = {
   async run(args, context) {
     const store = new FileCredentialStore();
     const [verb, provider, ...rest] = args;
-    if (rest.length || (provider && provider !== 'openai-chatgpt')) {
-      context.stderr('Usage: vian auth login|list|status|logout [openai-chatgpt]\n'); return 2;
+    if (rest.length || (provider && provider !== 'openai-chatgpt' && !apiKeyProviders.has(provider))) {
+      context.stderr('Usage: vian auth login openai-chatgpt | set google|vercel-ai-gateway | list | status|logout <provider>\n'); return 2;
     }
     if (verb === 'list') {
       if (provider) { context.stderr('Usage: vian auth list\n'); return 2; }
@@ -36,14 +30,24 @@ export const authCommand: CommandModule = {
     }
     if (!provider) { context.stderr('Provider required\n'); return 2; }
     if (verb === 'status') {
-      const record = (await store.list()).find(x => x.name === 'default' && x.provider === provider);
-      context.stdout(`${JSON.stringify(record ?? { name: 'default', provider, status: 'reauth-required' })}\n`); return record?.status === 'ready' ? 0 : 1;
+      const name = providerProfile(provider);
+      const record = (await store.list()).find(x => x.name === name && x.provider === provider);
+      context.stdout(`${JSON.stringify(record ?? { name, provider, status: 'reauth-required' })}\n`); return record?.status === 'ready' ? 0 : 1;
     }
-    if (verb === 'logout') { await store.remove('default'); context.stdout('Credential profile removed\n'); return 0; }
+    if (verb === 'logout') { await store.remove(providerProfile(provider)); context.stdout('Credential profile removed\n'); return 0; }
+    if (verb === 'set' && apiKeyProviders.has(provider)) {
+      try {
+        const key = await readHiddenLine(`${provider} API key: `);
+        await saveProviderApiKey(store, provider as ApiKeyProvider, key);
+        context.stdout(`Credential saved as profile:${providerProfile(provider)}.\n`);
+        return 0;
+      } catch (error) { context.stderr(`${error instanceof Error ? error.message : 'Credential was not saved.'}\n`); return 1; }
+    }
     if (verb === 'login') {
+      if (provider !== 'openai-chatgpt') { context.stderr('Use vian auth set for API-key providers.\n'); return 2; }
       try {
         const attempt = createAuthorization();
-        const code = await waitForLoopback(attempt, url => context.stdout(`Open this URL to authorize Vian:\n${url}\n`), process.stdin.isTTY ? hiddenCallbackInput : undefined);
+        const code = await waitForLoopback(attempt, url => context.stdout(`Open this URL to authorize Vian:\n${url}\n`), process.stdin.isTTY ? signal => readHiddenLine('Paste the complete callback URL, or finish in your browser: ', signal) : undefined);
         const tokens = await exchangeAuthorization(code, attempt);
         await saveSubscriptionTokens(store, 'default', tokens);
         context.stdout('Codex subscription authentication saved for profile default.\n');
@@ -53,6 +57,6 @@ export const authCommand: CommandModule = {
         return 1;
       }
     }
-    context.stderr('Usage: vian auth login|list|status|logout [openai-chatgpt]\n'); return 2;
+    context.stderr('Usage: vian auth login openai-chatgpt | set google|vercel-ai-gateway | list | status|logout <provider>\n'); return 2;
   },
 };

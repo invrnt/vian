@@ -37,7 +37,7 @@ function validateChoice(value: string, choices: readonly string[], flag: string)
 function defaultManifest(root: string, args: string[], forcedName?: string): BotManifest {
   const name = forcedName ?? option(args, '--name') ?? basename(root);
   const provider = validateChoice(option(args, '--provider') ?? 'google', ['google', 'vercel-ai-gateway', 'openai-chatgpt'], '--provider') as BotManifest['model']['provider'];
-  const credential = option(args, '--credential') ?? (provider === 'google' ? 'env:GEMINI_API_KEY' : provider === 'vercel-ai-gateway' ? 'env:AI_GATEWAY_API_KEY' : 'oauth:openai-chatgpt:default');
+  const credential = option(args, '--credential') ?? (provider === 'google' ? 'profile:google-default' : provider === 'vercel-ai-gateway' ? 'profile:vercel-ai-gateway-default' : 'oauth:openai-chatgpt:default');
   const model = option(args, '--model');
   if (!model) throw new Error('Specify --model with a model ID verified for your provider');
   const raw = { schemaVersion: 1, id: randomUUID(), name, instructions: option(args, '--instructions') ?? './VIAN.md', tools: option(args, '--tools') ?? './vian.tools.ts', model: { provider, id: model, credential }, gate: { type: 'telegram', credential: option(args, '--telegram-credential') ?? 'env:TELEGRAM_BOT_TOKEN', access: { mode: 'pairing', groups: false, administratorPrincipalIds: [] } }, runtime: { sameSessionPolicy: 'steer' } };
@@ -133,7 +133,7 @@ export async function wizardArgs(root: string, args: string[], forcedName?: stri
     validateChoice(provider, ['google', 'vercel-ai-gateway', 'openai-chatgpt'], 'provider');
     const model = (await rl.question('Verified model ID: ')).trim();
     if (!model) throw new Error('Model ID is required');
-    const defaultCredential = provider === 'google' ? 'env:GEMINI_API_KEY' : provider === 'vercel-ai-gateway' ? 'env:AI_GATEWAY_API_KEY' : 'oauth:openai-chatgpt:default';
+    const defaultCredential = provider === 'google' ? 'profile:google-default' : provider === 'vercel-ai-gateway' ? 'profile:vercel-ai-gateway-default' : 'oauth:openai-chatgpt:default';
     const credential = (await rl.question(`Model credential reference [${defaultCredential}]: `)).trim() || defaultCredential;
     const telegram = (await rl.question('Telegram credential reference [env:TELEGRAM_BOT_TOKEN]: ')).trim() || 'env:TELEGRAM_BOT_TOKEN';
     const registerAnswer = (await rl.question('Register globally? [Y/n]: ')).trim().toLowerCase();

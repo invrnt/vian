@@ -32,6 +32,8 @@ Source: PRD §§10, 32, 47–49, 52.
 
 Resolve env relative to each bot and OAuth by global reference. Reject obvious inline tokens unless explicitly overridden. No secrets in list/inspect/logs/audit or prompts except deliberately exposed application-tool data.
 
+Assumption: Google and Gateway API keys may use global, provider-specific `profile:google-default` and `profile:vercel-ai-gateway-default` references, created by hidden `vian auth set` prompts. New bots select these global profiles by default. Explicit bot-local `env:` references remain valid for existing setups. This keeps model/provider selection per bot while avoiding repeated account credentials; validate with profile and adapter tests.
+
 Acceptance: Canary secrets from two bot roots never cross and cannot be found in captured CLI/log/history/provider error output; restrictive files remain restrictive after atomic replace. Metadata-only audit omits sensitive args/results.
 
 ## V030: Provider error and media compatibility

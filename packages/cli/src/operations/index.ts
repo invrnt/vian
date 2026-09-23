@@ -82,6 +82,7 @@ export async function runOperations(args: string[], context: CommandContext): Pr
       return 0;
     }
     if (command === 'service') return service(rest, context);
+    if (command === 'telegram') { const { connectTelegram } = await import('./telegram.ts'); await connectTelegram(rest, context); return 0; }
     if (command === 'test') { const { localTest } = await import('./test.ts'); return localTest(rest, context); }
     if (command === 'access') { await access(rest, context); return 0; }
     if (command === 'logs') { await showLogs(rest, context); return 0; }

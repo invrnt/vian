@@ -17,6 +17,8 @@ vian logs my-bot --follow
 
 `doctor --online` calls Telegram `getMe`, resolves the provider credential locally and connects to configured MCP servers. It does not make a billable model call. A local test is the appropriate model-path check:
 
+`vian auth login openai-chatgpt` saves a global OAuth profile. `vian auth set google` and `vian auth set vercel-ai-gateway` save global API-key profiles with hidden prompts. New bots select those profiles by default; an explicit bot-local `env:` model key is still supported. `vian telegram connect <bot>` validates and saves that bot's Telegram token with a hidden prompt, then reloads it if the daemon is running.
+
 ```sh
 vian test my-bot 'Use the hello tool to greet Ada'
 ```

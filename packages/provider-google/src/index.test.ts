@@ -10,6 +10,9 @@ test('Google adapter uses explicit bot credential and preserves configured model
   const model = await googleAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-a', modelId: 'custom-model-id', credential: 'env:GEMINI_API_KEY' });
   expect(typeof model === 'string' ? model : model.modelId).toBe('custom-model-id');
   expect(calls).toEqual(['/tmp/bot-a:env:GEMINI_API_KEY']);
+  await googleAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-b', modelId: 'custom-model-id', credential: 'profile:google-default' });
+  expect(calls[1]).toBe('/tmp/bot-b:profile:google-default');
+  await expect(googleAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-b', modelId: 'other', credential: 'profile:vercel-ai-gateway-default' })).rejects.toThrow('credential reference');
   await expect(googleAdapter(resolver).resolveModel({ botId, botRoot: '/tmp/bot-a', modelId: 'other' })).rejects.toThrow('credential reference');
 });
 
