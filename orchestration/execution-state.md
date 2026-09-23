@@ -2,7 +2,7 @@
 
 | Agent | Status | Branch/worktree | Commit | Validation evidence | Integrated revision | Blocker |
 |---|---|---|---|---|---|---|
-| F | ready | — | — | — | — | — |
+| F | running | codex/vian-foundation `/home/jc/dev/personal/vian-f` | — | — | — | — |
 | S | pending F | — | — | — | — | — |
 | C | pending S | — | — | — | — | — |
 | T | pending S | — | — | — | — | — |
