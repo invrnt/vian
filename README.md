@@ -2,7 +2,7 @@
 
 Vian runs small, explicit-tool conversational bots from local directories. One daemon hosts the registered bots; each bot keeps its configuration, SQLite history and attachments in its own directory.
 
-Coding agents adding Vian to an existing app should follow the short [bot setup skill](skill.md).
+Coding agents working with Vian should follow the short [usage skill](skill.md).
 
 ## Build and first bot
 
