@@ -401,3 +401,25 @@ test('owner access listings include pending codes and only active bindings', asy
     expect(nextContext?.conversationId).not.toBe(context?.conversationId);
   } finally { f.cleanup(); }
 });
+
+test('administrator sync clears removed unbound principals across restart', async () => {
+  const f = fixture();
+  try {
+    const unbound = 'future-admin' as PrincipalId;
+    await f.store.bindActor(actor, principalId);
+    await f.store.syncAdministrators([principalId, unbound, unbound]);
+    expect((await f.store.listActorBindings())[0]?.isAdministrator).toBe(true);
+    await f.store.syncAdministrators([principalId, unbound]);
+    f.store.close();
+    const reopened = new SqliteBotStore(botId, f.path);
+    await reopened.syncAdministrators([]);
+    expect((await reopened.listActorBindings())[0]?.isAdministrator).toBe(false);
+    const futureActor = { gate: 'telegram' as const, externalId: '789' };
+    await reopened.bindActor(futureActor, unbound);
+    expect((await reopened.listActorBindings()).find(row => row.principalId === unbound)?.isAdministrator).toBe(false);
+    const events = [];
+    for await (const row of reopened.history({})) if (row.kind === 'authorization_changed') events.push(row);
+    expect(events).toHaveLength(4);
+    reopened.close();
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
