@@ -50,6 +50,24 @@ export class SqliteBotStore implements BotStore {
       this.audit({ id: randomUUID() as EventId, botId: this.botId, principalId, kind: 'authorization_changed', at: now(), payload: { isAdministrator: enabled } });
     }).immediate();
   }
+  async syncAdministrators(principalIds: PrincipalId[]): Promise<void> {
+    this.db.transaction(() => {
+      const desired = new Set(principalIds);
+      const existing = this.db.query('SELECT id,is_admin FROM principals').all() as { id: PrincipalId; is_admin: number }[];
+      const known = new Set(existing.map(row => row.id));
+      for (const row of existing) {
+        const enabled = desired.has(row.id);
+        if (!!row.is_admin === enabled) continue;
+        this.db.query('UPDATE principals SET is_admin=? WHERE id=?').run(enabled ? 1 : 0, row.id);
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, principalId: row.id, kind: 'authorization_changed', at: now(), payload: { isAdministrator: enabled } });
+      }
+      for (const id of desired) {
+        if (known.has(id)) continue;
+        this.db.query('INSERT INTO principals(id,is_admin) VALUES (?,1)').run(id);
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, principalId: id, kind: 'authorization_changed', at: now(), payload: { isAdministrator: true } });
+      }
+    }).immediate();
+  }
   async bindDestination(destination: ExternalDestination, conversationId: ConversationId, initiatorId: PrincipalId): Promise<SessionId> {
     return this.db.transaction(() => {
       this.db.query('INSERT OR IGNORE INTO principals(id) VALUES (?)').run(initiatorId);
