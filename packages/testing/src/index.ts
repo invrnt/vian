@@ -6,12 +6,14 @@ export class FakeGate implements GateAdapter {
   readonly type = 'telegram';
   private inbound?: (event: InboundEvent) => Promise<void>;
   readonly deliveries: { part: RenderedPart; destination: ExternalDestination }[] = [];
+  readonly deliveryOutcomes: DeliveryOutcome[] = [];
+  queueDelivery(...outcomes: DeliveryOutcome[]): void { this.deliveryOutcomes.push(...outcomes); }
   capabilities(): GateCapabilities { return { text:true, formatting:['plain'], streaming:true, stopGeneration:true, buttons:true, attachments:true, replies:true, groups:true, threads:true }; }
   async validate(): Promise<void> {}
   async start(onInbound: (event: InboundEvent) => Promise<void>): Promise<void> { this.inbound = onInbound; }
   async stop(): Promise<void> { this.inbound = undefined; }
   async emit(event: InboundEvent): Promise<void> { if (!this.inbound) throw new Error('Gate not started'); await this.inbound(event); }
   async render(message: CanonicalMessage): Promise<RenderedPart[]> { return message.parts.map((p, partIndex) => p.type==='text' ? {partIndex,kind:'text',text:p.text} : p.type==='interaction' ? {partIndex,kind:'text',text:p.label} : {partIndex,kind:'file',attachment:{id:p.attachmentId,name:p.name??'file',mimeType:p.mimeType??'application/octet-stream',size:0}}); }
-  async deliver(part: RenderedPart, destination: ExternalDestination): Promise<DeliveryOutcome> { this.deliveries.push({part,destination}); return {kind:'succeeded',receipt:{externalId:String(this.deliveries.length),sentAt:new Date().toISOString()}}; }
+  async deliver(part: RenderedPart, destination: ExternalDestination): Promise<DeliveryOutcome> { this.deliveries.push({part,destination}); return this.deliveryOutcomes.shift() ?? {kind:'succeeded',receipt:{externalId:String(this.deliveries.length),sentAt:new Date().toISOString()}}; }
 }
 export { MockLanguageModelV4 };
