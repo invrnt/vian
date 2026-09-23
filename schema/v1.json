@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instructions": {
+      "default": "./VIAN.md",
+      "type": "string"
+    },
+    "tools": {
+      "default": "./vian.tools.ts",
+      "type": "string"
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "google",
+            "vercel-ai-gateway",
+            "openai-chatgpt"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "credential": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            {
+              "type": "string",
+              "pattern": "^profile:[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "telegram"
+        },
+        "credential": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            {
+              "type": "string",
+              "pattern": "^profile:[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          ]
+        },
+        "access": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "default": "pairing",
+              "type": "string",
+              "enum": [
+                "pairing",
+                "allowlist"
+              ]
+            },
+            "groups": {
+              "default": false,
+              "type": "boolean"
+            },
+            "administratorPrincipalIds": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "groups",
+            "administratorPrincipalIds"
+          ],
+          "additionalProperties": false
+        },
+        "telegram": {
+          "type": "object",
+          "properties": {
+            "streaming": {
+              "default": true,
+              "type": "boolean"
+            },
+            "format": {
+              "default": "markdown-v2",
+              "type": "string",
+              "enum": [
+                "markdown-v2",
+                "plain"
+              ]
+            },
+            "buttons": {
+              "default": true,
+              "type": "boolean"
+            },
+            "stopGeneration": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "streaming",
+            "format",
+            "buttons",
+            "stopGeneration"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "credential",
+        "access",
+        "telegram"
+      ],
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "maxSteps": {
+          "default": 12,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "runTimeoutSeconds": {
+          "default": 180,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "perBotConcurrency": {
+          "default": 4,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "sameSessionPolicy": {
+          "default": "steer",
+          "type": "string",
+          "enum": [
+            "steer",
+            "queue"
+          ]
+        }
+      },
+      "required": [
+        "maxSteps",
+        "runTimeoutSeconds",
+        "perBotConcurrency",
+        "sameSessionPolicy"
+      ],
+      "additionalProperties": false
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "default": "summary-tail",
+          "type": "string",
+          "const": "summary-tail"
+        },
+        "maxRecentMessages": {
+          "default": 80,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "strategy",
+        "maxRecentMessages"
+      ],
+      "additionalProperties": false
+    },
+    "attachments": {
+      "type": "object",
+      "properties": {
+        "defaultTtlHours": {
+          "default": 24,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8760
+        },
+        "maxFileBytes": {
+          "default": 52428800,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "defaultTtlHours",
+        "maxFileBytes"
+      ],
+      "additionalProperties": false
+    },
+    "mcp": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tools": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "name",
+          "command",
+          "args",
+          "tools"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "instructions",
+    "tools",
+    "model",
+    "gate",
+    "runtime",
+    "context",
+    "attachments",
+    "mcp"
+  ],
+  "additionalProperties": false
+}
