@@ -58,3 +58,22 @@ test('interrupted replacement leaves the previous complete profile available', a
   expect(Buffer.from((await store.read('default'))!).toString()).toBe('first');
   expect((await store.list()).map(x => x.name)).toEqual(['default']);
 });
+
+test('many contenders can acquire a rapidly released profile lock without overlap', async () => {
+  const root = await fixture();
+  const stores = Array.from({ length: 12 }, () => new FileCredentialStore(join(root, 'profiles')));
+  let active = 0;
+  let completed = 0;
+  await Promise.all(stores.map(async store => {
+    for (let i = 0; i < 12; i++) {
+      await store.withProfileLock('default', async () => {
+        active++;
+        expect(active).toBe(1);
+        await Bun.sleep(0);
+        completed++;
+        active--;
+      });
+    }
+  }));
+  expect(completed).toBe(144);
+});

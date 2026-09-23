@@ -118,7 +118,13 @@ export class FileCredentialStore implements CredentialStore {
       try { await mkdir(lock, { mode: 0o700 }); break; }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        const age = Date.now() - (await stat(lock)).mtimeMs;
+        let age: number;
+        try { age = Date.now() - (await stat(lock)).mtimeMs; }
+        catch (statError) {
+          // The holder can release the lock between mkdir's EEXIST and stat.
+          if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw statError;
+        }
         if (age > 60_000) { await rm(lock, { recursive: true, force: true }); continue; }
         if (Date.now() >= deadline) throw new Error('Credential profile is busy');
         await Bun.sleep(40 + Math.floor(Math.random() * 40));
