@@ -76,7 +76,7 @@ export async function doctor(args: string[], context: CommandContext): Promise<v
         const token = await secrets.resolve(record.id, record.path, manifest.gate.credential);
         await new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups }).validate();
         add(checks, 'Telegram getMe', true, 'authenticated');
-      } catch (error) { add(checks, 'Telegram getMe', false, error instanceof Error ? error.message : 'Telegram unavailable'); }
+      } catch { add(checks, 'Telegram getMe', false, 'Telegram authentication or connection failed; check the bot secret and network'); }
       try {
         await providerFor(manifest, secrets, profiles).resolveModel({ botId: record.id, botRoot: record.path, modelId: manifest.model.id, credential: manifest.model.credential });
         if (manifest.model.provider === 'openai-chatgpt') {

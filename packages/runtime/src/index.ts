@@ -19,7 +19,7 @@ export interface RuntimeDependencies {
   now?: () => Date;
   logger?: { info(message: string): void; error(message: string): void };
   /** The daemon may impose a lower shared limit. */
-  globalRunPermit?: { acquire(): Promise<() => void> };
+  globalRunPermit?: { acquire(signal?: AbortSignal): Promise<() => void> };
 }
 
 const asId = <T extends string>(value: string) => value as T;
@@ -165,7 +165,7 @@ export class BotRuntime {
       this.runningCount++;
       let releaseGlobal: (() => void) | undefined;
       try {
-        releaseGlobal = await this.deps.globalRunPermit?.acquire();
+        releaseGlobal = await this.deps.globalRunPermit?.acquire(abort.signal);
         await this.execute(runId, input, principalId, abort.signal);
       }
       catch (error) {

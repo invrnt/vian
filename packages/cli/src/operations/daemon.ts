@@ -9,15 +9,27 @@ import { appendLog } from './logs.ts';
 
 type BotState = { record: RegistryRecord; instance?: AssembledBot; error?: string };
 const operations = new Set(['load', 'start', 'stop', 'restart', 'status', 'shutdown']);
-class RunPermit {
+function safeOperationalError(error: unknown): string {
+  const value = error instanceof Error ? error.message : 'Bot operation failed';
+  return value.replace(/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, '[redacted]').replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, '[redacted]');
+}
+export class RunPermit {
   private active = 0;
-  private readonly waiting: Array<(release: () => void) => void> = [];
+  private readonly waiting: Array<{ resolve(release: () => void): void; reject(error: Error): void; signal?: AbortSignal }> = [];
   constructor(private readonly limit: number) {}
-  acquire(): Promise<() => void> {
+  acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) return Promise.reject(new DOMException('Generation stopped', 'AbortError'));
     if (this.active < this.limit) { this.active++; return Promise.resolve(() => this.release()); }
-    return new Promise(resolve => this.waiting.push(resolve));
+    return new Promise((resolve, reject) => {
+      const item = { resolve, reject, signal };
+      this.waiting.push(item);
+      signal?.addEventListener('abort', () => {
+        const index = this.waiting.indexOf(item);
+        if (index >= 0) { this.waiting.splice(index, 1); reject(new DOMException('Generation stopped', 'AbortError')); }
+      }, { once: true });
+    });
   }
-  private release(): void { const next = this.waiting.shift(); if (next) next(() => this.release()); else this.active--; }
+  private release(): void { const next = this.waiting.shift(); if (next) next.resolve(() => this.release()); else this.active--; }
 }
 
 export class VianDaemon {
@@ -48,7 +60,7 @@ export class VianDaemon {
       state.error = undefined;
       appendLog(root, 'info', 'bot_started');
     } catch (error) {
-      state.error = error instanceof Error ? error.message : 'Bot failed to start';
+      state.error = safeOperationalError(error);
       if (existsSync(state.record.path)) appendLog(state.record.path, 'error', `bot_start_failed: ${state.error}`);
       throw error;
     }
@@ -115,7 +127,7 @@ export class VianDaemon {
     if (!request || request.version !== CONTROL_VERSION || typeof request.requestId !== 'string' || request.requestId.length > 128 || !operations.has(request.operation)) return bad('INVALID_REQUEST', 'Invalid control request');
     if (this.stopping) return bad('SHUTTING_DOWN', 'Daemon is shutting down');
     try {
-      if (request.operation === 'status' && !request.bot) return { version: CONTROL_VERSION, requestId: request.requestId, ok: true, data: [...this.bots.values()].map(state => this.status(state)) };
+      if (request.operation === 'status' && !request.bot) return { version: CONTROL_VERSION, requestId: request.requestId, ok: true, data: await Promise.all([...this.bots.values()].map(state => this.status(state))) };
       if (request.operation === 'shutdown') { setTimeout(() => void this.stop(), 0); return { version: CONTROL_VERSION, requestId: request.requestId, ok: true }; }
       if (!request.bot || typeof request.bot !== 'string') return bad('BOT_REQUIRED', 'Bot selector is required');
       const state = await this.refreshRecord(request.bot);
@@ -123,10 +135,13 @@ export class VianDaemon {
       if (request.operation === 'stop') await this.stopBot(state);
       else if (request.operation === 'start' || request.operation === 'load') { if (state.record.enabled || request.operation === 'start') await this.startBot(state); }
       else if (request.operation === 'restart') { await (this.dependencies.validate ?? validateBot)(state.record); await this.stopBot(state); await this.startBot(state); }
-      return { version: CONTROL_VERSION, requestId: request.requestId, ok: true, data: this.status(state) };
-    } catch (error) { return bad('BOT_ERROR', error instanceof Error ? error.message : 'Bot operation failed'); }
+      return { version: CONTROL_VERSION, requestId: request.requestId, ok: true, data: await this.status(state) };
+    } catch (error) { return bad('BOT_ERROR', safeOperationalError(error)); }
   }
-  private status(state: BotState) { return { bot: state.record.alias, id: state.record.id, enabled: state.record.enabled, status: state.instance ? 'running' : state.error ? 'error' : 'stopped', ...(state.error ? { error: state.error } : {}) }; }
+  private async status(state: BotState) {
+    const deliveries = state.instance ? await state.instance.store.listDeliveries() : [];
+    return { bot: state.record.alias, id: state.record.id, enabled: state.record.enabled, status: state.instance ? 'running' : state.error ? 'error' : 'stopped', ...(state.error ? { error: state.error } : {}), ...(state.instance ? { heldDeliveries: deliveries.filter(item => item.state === 'ambiguous').length } : {}) };
+  }
   async stop(): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;

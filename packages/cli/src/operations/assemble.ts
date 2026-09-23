@@ -13,7 +13,7 @@ import { McpToolRuntime } from '../../../mcp/src/index.ts';
 import { manifestAt } from '../local/common.ts';
 
 export interface AssembledBot { runtime: BotRuntime; store: SqliteBotStore; manifest: BotManifest; close(): Promise<void> }
-export interface SharedRunPermit { acquire(): Promise<() => void> }
+export interface SharedRunPermit { acquire(signal?: AbortSignal): Promise<() => void> }
 
 /** A process may recover a bot's leases only after taking this exclusive owner lock. */
 export function acquireBotOwnership(root: string): () => void {
@@ -85,7 +85,7 @@ export async function assembleBot(record: RegistryRecord, logger: { info(message
       const currentStore = store;
       const attachments = new AttachmentRegistry(id => id === record.id ? { root: record.path, store: currentStore } : undefined, manifest.attachments.maxFileBytes, manifest.attachments.defaultTtlHours);
       attachments.trackBot(record.id);
-      const gate = new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups });
+      const gate = new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups, onFatal: () => logger.error('Telegram polling failed; retrying') });
       const mcpTools = Object.fromEntries(mcp.definitions().map(definition => [definition.name, {
         description: definition.description, inputSchema: definition.inputSchema,
         execute: async (input: unknown, context: Parameters<NonNullable<typeof native.tools[string]['execute']>>[1]) => {

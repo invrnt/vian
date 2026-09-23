@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, appendFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
@@ -15,5 +15,6 @@ export function appendLog(root: string, level: 'info' | 'error', event: string):
     renameSync(path, `${path}.1`);
   }
   if (!existsSync(path)) writeFileSync(path, '', { mode: 0o600 });
-  appendFileSync(path, JSON.stringify({ at: new Date().toISOString(), level, event }) + '\n');
+  chmodSync(path, 0o600);
+  appendFileSync(path, JSON.stringify({ at: new Date().toISOString(), level, event: event.slice(0, 4096) }) + '\n');
 }

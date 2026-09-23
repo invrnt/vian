@@ -5,8 +5,10 @@ import { spawn } from 'node:child_process';
 import type { CommandContext } from '@vian/core';
 
 export function renderUserUnit(executable: string): string {
-  if (/[\r\n]/.test(executable)) throw new Error('Invalid executable path');
-  return `[Unit]\nDescription=Vian bot daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${executable.replaceAll('%', '%%')} daemon\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n`;
+  if (/[\r\n]/.test(executable) || !executable.startsWith('/')) throw new Error('Service executable must be an absolute path');
+  const escaped = executable.replaceAll('%', '%%').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  const command = /\s|"/.test(escaped) ? `"${escaped}"` : escaped;
+  return `[Unit]\nDescription=Vian bot daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=${command} daemon\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 export async function serviceCommand(verb: string, context: CommandContext, run = async (command: string, args: string[]) => {
@@ -25,6 +27,8 @@ export async function serviceCommand(verb: string, context: CommandContext, run 
     await writeFile(unitPath, renderUserUnit(options.executable ?? process.execPath), { mode: 0o600 });
     const reload = await run('systemctl', ['--user', 'daemon-reload']);
     if (reload.code) throw new Error(reload.stderr || 'systemctl daemon-reload failed');
+    const enabled = await run('systemctl', ['--user', 'enable', 'vian.service']);
+    if (enabled.code) throw new Error(enabled.stderr || 'systemctl enable failed');
     context.stdout(`Installed ${unitPath}\nFor operation after logout, enable user lingering with: loginctl enable-linger ${process.env.USER ?? '<user>'}\n`);
     return 0;
   }
