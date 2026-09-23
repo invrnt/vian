@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { z } from 'zod';
-export const SecretReferenceSchema = z.union([z.string().regex(/^env:[A-Za-z_][A-Za-z0-9_]*$/), z.string().regex(/^profile:[A-Za-z0-9][A-Za-z0-9._-]*$/)]);
+export const SecretReferenceSchema = z.union([z.string().regex(/^env:[A-Za-z_][A-Za-z0-9_]*$/), z.string().regex(/^profile:[A-Za-z0-9][A-Za-z0-9._-]*$/), z.string().regex(/^oauth:openai-chatgpt:[A-Za-z0-9][A-Za-z0-9._-]*$/)]);
 export type SecretReference = z.infer<typeof SecretReferenceSchema>;
 const Model = z.strictObject({ provider: z.enum(['google','vercel-ai-gateway','openai-chatgpt']), id: z.string().min(1), credential: SecretReferenceSchema.optional() });
 const Access = z.strictObject({ mode: z.enum(['pairing','allowlist']).default('pairing'), groups: z.boolean().default(false), administratorPrincipalIds: z.array(z.string().min(1)).default([]) });

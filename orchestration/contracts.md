@@ -4,7 +4,7 @@ Code owns field-level definitions as of foundation revision. Changes follow the 
 
 ## C01: Configuration and commands
 
-Authority: [config.ts](../packages/core/src/config.ts), [commands.ts](../packages/core/src/commands.ts), generated [v1.json](../schema/v1.json), and [config.test.ts](../packages/core/src/config.test.ts). Manifest parsing rejects unknown fields and future versions. The default same-session policy is steer; queue remains explicit. CLI commands export a narrow run function. The schema is generated from the Zod authority.
+Authority: [config.ts](../packages/core/src/config.ts), [commands.ts](../packages/core/src/commands.ts), generated [v1.json](../schema/v1.json), and [config.test.ts](../packages/core/src/config.test.ts). Manifest parsing rejects unknown fields and future versions. Credential references accept bot-root `env:`, named `profile:`, and explicit `oauth:openai-chatgpt:<profile>` syntax; token resolution stays behind C05. The default same-session policy is steer; queue remains explicit. CLI commands export a narrow run function. The schema is generated from the Zod authority.
 
 ## C02: Canonical events and identity
 

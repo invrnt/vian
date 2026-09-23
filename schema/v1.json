@@ -50,6 +50,10 @@
             {
               "type": "string",
               "pattern": "^profile:[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            {
+              "type": "string",
+              "pattern": "^oauth:openai-chatgpt:[A-Za-z0-9][A-Za-z0-9._-]*$"
             }
           ]
         }
@@ -76,6 +80,10 @@
             {
               "type": "string",
               "pattern": "^profile:[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            {
+              "type": "string",
+              "pattern": "^oauth:openai-chatgpt:[A-Za-z0-9][A-Za-z0-9._-]*$"
             }
           ]
         },
