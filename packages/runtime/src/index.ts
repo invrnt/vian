@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { generateText, jsonSchema, stepCountIs, streamText, tool, type ModelMessage } from 'ai';
-import type { ActionId, AttachmentPort, AuditEvent, BotId, BotManifest, BotStore, CanonicalMessage, ConversationId, ExternalDestination, GateAdapter, InboxRecord, InboundEvent, MessageId, NativeToolSet, OutboxPart, PrincipalId, ProviderAdapter, RunId, SessionId, ToolCallId, ToolContext } from '@vian/core';
+import type { ActionId, AttachmentId, AttachmentPort, AuditEvent, BotId, BotManifest, BotStore, CanonicalMessage, ConversationId, ExternalDestination, GateAdapter, InboxRecord, InboundEvent, MessageId, NativeToolSet, OutboxPart, PrincipalId, ProviderAdapter, RunId, SessionId, ToolCallId, ToolContext } from '@vian/core';
 export { AccessService } from './access.ts';
 
 export interface RuntimeDependencies {
@@ -19,7 +19,7 @@ export interface RuntimeDependencies {
   now?: () => Date;
   logger?: { info(message: string): void; error(message: string): void };
   /** The daemon may impose a lower shared limit. */
-  globalRunPermit?: { acquire(): Promise<() => void> };
+  globalRunPermit?: { acquire(signal?: AbortSignal): Promise<() => void> };
 }
 
 const asId = <T extends string>(value: string) => value as T;
@@ -165,7 +165,7 @@ export class BotRuntime {
       this.runningCount++;
       let releaseGlobal: (() => void) | undefined;
       try {
-        releaseGlobal = await this.deps.globalRunPermit?.acquire();
+        releaseGlobal = await this.deps.globalRunPermit?.acquire(abort.signal);
         await this.execute(runId, input, principalId, abort.signal);
       }
       catch (error) {
@@ -204,9 +204,27 @@ export class BotRuntime {
     if (!ctx) throw new Error('Authorization changed');
     const model = await this.deps.provider.resolveModel({ botId: this.deps.botId, botRoot: this.deps.botRoot, modelId: this.deps.manifest.model.id, credential: this.deps.manifest.model.credential });
     const instructions = await readFile(resolve(this.deps.botRoot, this.deps.manifest.instructions), 'utf8');
+    const availableAttachments = new Set<AttachmentId>(input.event.parts?.filter(part => part.type === 'attachment').map(part => part.attachmentId) ?? []);
+    const attachmentTools: NativeToolSet = {
+      list_attachments: {
+        description: 'List attachments available in the current conversation.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        execute: async () => this.deps.attachments.list(this.deps.botId, [...availableAttachments]),
+      },
+      send_attachment: {
+        description: 'Send an available attachment to this conversation.',
+        inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+        execute: async args => {
+          const id = (args as { id: string }).id as AttachmentId;
+          if (!(await this.deps.attachments.list(this.deps.botId, [id])).length) throw new Error('Attachment unavailable');
+          return { kind: 'attachment-send', attachmentId: id };
+        },
+      },
+    };
     const gateTools = this.deps.gate.modelTools?.() ?? {};
     for (const name of Object.keys(gateTools)) if (this.deps.tools?.[name]) throw new Error(`Duplicate tool name: ${name}`);
-    const modelTools = { ...this.deps.tools, ...gateTools };
+    for (const name of Object.keys(attachmentTools)) if (this.deps.tools?.[name] || gateTools[name]) throw new Error(`Duplicate tool name: ${name}`);
+    const modelTools = { ...this.deps.tools, ...gateTools, ...attachmentTools };
     const previous = await this.contextMessages(sessionId, input.messageId!, model);
     const summaryContext = previous.filter(message => message.role === 'system').map(message => message.content).join('\n');
     const messages: ModelMessage[] = [...previous.filter(message => message.role !== 'system'), { role: 'user', content: textOf({ id: input.messageId!, botId: this.deps.botId, conversationId: ctx.conversationId, sessionId, principalId, runId, role: 'user', parts: input.event.parts ?? [], createdAt: input.acceptedAt }) }];
@@ -225,6 +243,10 @@ export class BotRuntime {
           const auditResult = native.audit === 'metadata-only' ? { redacted: true } : { result: value };
           await this.deps.store.transitionTool(callId, runId, 'succeeded', { tool: name, ...auditResult });
           toolOutput.push(value);
+          if (value && typeof value === 'object' && 'attachment' in value) {
+            const attachment = value.attachment as { id?: AttachmentId } | undefined;
+            if (attachment?.id) availableAttachments.add(attachment.id);
+          }
           return value;
         } catch (error) {
           await this.deps.store.transitionTool(callId, runId, 'failed', { tool: name, safeMessage: safeError(error) });
@@ -273,7 +295,9 @@ export class BotRuntime {
         if (typeof p.text !== 'string' || !Array.isArray(p.rows)) return [];
         return [p as { text: string; rows: { label: string; actionId: ActionId }[][] }];
       }).at(-1);
-      const finalMessage: CanonicalMessage = { id: asId<MessageId>(randomUUID()), botId: this.deps.botId, conversationId: ctx.conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: presentation?.text ?? finalText }], createdAt: this.now().toISOString() };
+      const sentAttachments = toolOutput.flatMap(value => value && typeof value === 'object' && 'kind' in value && value.kind === 'attachment-send' && 'attachmentId' in value ? [value.attachmentId as AttachmentId] : []);
+      const files = await this.deps.attachments.list(this.deps.botId, sentAttachments);
+      const finalMessage: CanonicalMessage = { id: asId<MessageId>(randomUUID()), botId: this.deps.botId, conversationId: ctx.conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: presentation?.text ?? finalText }, ...files.map(file => ({ type: 'attachment' as const, attachmentId: file.id, name: file.name, mimeType: file.mimeType }))], createdAt: this.now().toISOString() };
       const rendered = await this.deps.gate.render(finalMessage);
       if (presentation?.rows.length && rendered[0]) rendered[0].buttons = presentation.rows;
       const parts: OutboxPart[] = rendered.map(part => ({ id: randomUUID(), botId: this.deps.botId, messageId: finalMessage.id, destination: input.event.destination, part, state: 'queued', attempt: 0 }));

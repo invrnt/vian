@@ -63,7 +63,35 @@ export async function doctor(args: string[], context: CommandContext): Promise<v
       else { const mode = statSync(attachments).mode & 0o777; add(checks, 'attachment directory', (mode & 0o077) === 0, `${attachments}: mode ${mode.toString(8)}`); }
     }
   }
-  if (online) add(checks, 'online probes', false, 'Online probes require assembled Telegram, provider and MCP adapters');
+  if (online && existsSync(record.path)) {
+    try {
+      const manifest = manifestAt(record.path);
+      const { FileCredentialStore, BotSecretResolver } = await import('@vian/credentials');
+      const { TelegramGate } = await import('../../../gate-telegram/src/index.ts');
+      const { McpToolRuntime } = await import('../../../mcp/src/index.ts');
+      const { providerFor } = await import('../operations/assemble.ts');
+      const profiles = new FileCredentialStore();
+      const secrets = new BotSecretResolver(profiles);
+      try {
+        const token = await secrets.resolve(record.id, record.path, manifest.gate.credential);
+        await new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups }).validate();
+        add(checks, 'Telegram getMe', true, 'authenticated');
+      } catch { add(checks, 'Telegram getMe', false, 'Telegram authentication or connection failed; check the bot secret and network'); }
+      try {
+        await providerFor(manifest, secrets, profiles).resolveModel({ botId: record.id, botRoot: record.path, modelId: manifest.model.id, credential: manifest.model.credential });
+        if (manifest.model.provider === 'openai-chatgpt') {
+          const name = manifest.model.credential?.slice('oauth:openai-chatgpt:'.length);
+          const profile = (await profiles.list()).find(item => item.name === name && item.provider === 'openai-chatgpt');
+          if (profile?.status !== 'ready') throw new Error('ChatGPT profile requires login');
+        }
+        add(checks, 'provider credential', true, 'resolved locally; no nonbillable live model probe');
+      } catch (error) { add(checks, 'provider credential', false, error instanceof Error ? error.message : 'Provider credential unavailable'); }
+      const mcp = new McpToolRuntime();
+      try { await mcp.start(manifest.mcp); add(checks, 'MCP connectivity', true, `${manifest.mcp.length} configured servers connected`); }
+      catch (error) { add(checks, 'MCP connectivity', false, error instanceof Error ? error.message : 'MCP unavailable'); }
+      finally { await mcp.close(); }
+    } catch (error) { add(checks, 'online probes', false, error instanceof Error ? error.message : 'Configuration unavailable'); }
+  }
   const data = { bot: record.alias, mode: online ? 'online' : 'offline', ok: checks.every(check => check.ok), checks };
   if (has(args, '--json')) context.stdout(JSON.stringify({ ok: data.ok, data }) + '\n');
   else for (const check of checks) context.stdout(`${check.ok ? 'OK' : 'FAIL'} ${check.name}: ${check.detail}\n`);
