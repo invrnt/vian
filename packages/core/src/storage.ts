@@ -11,7 +11,7 @@ export interface RegistryStore { register(record: RegistryRecord, mode?: 'new' |
 export interface InboxRecord { id: EventId; botId: BotId; event: InboundEvent; sequence: number; acceptedAt: string; messageId?: MessageId; sessionId?: SessionId }
 export interface SessionLease { sessionId: SessionId; holder: string; expiresAt: string }
 export interface SessionSummary { id: SessionId; conversationId: ConversationId; initiatorId: PrincipalId; createdAt: string; lastActiveAt: string; messageCount: number; state: 'active' | 'inactive' }
-export interface BotSchemaInspection { currentVersion: number; supportedVersion: number; compatible: boolean }
+export interface BotSchemaInspection { exists: boolean; currentVersion: number; supportedVersion: number; compatible: boolean }
 /** Implemented as a read-only standalone storage export. It must not create or migrate a database. */
 export type InspectBotSchema = (path: string) => BotSchemaInspection;
 export interface HistoryFilter { sessionId?: SessionId; principalId?: PrincipalId; since?: string; toolsOnly?: boolean; afterSequence?: number; limit?: number }
@@ -29,6 +29,8 @@ export interface BotStore extends ActionPort {
   readPendingInbound(sessionId: SessionId): Promise<InboxRecord[]>;
   resolveActor(actor: ExternalActor): Promise<PrincipalId | undefined>;
   resolveDestination(destination: ExternalDestination, principalId: PrincipalId): Promise<AuthorizedContext | undefined>;
+  /** Trusted reverse lookup of the active nonrevoked destination binding. */
+  destinationForConversation(conversationId: ConversationId): Promise<ExternalDestination | undefined>;
   createPairing(actor: ExternalActor, expiresAt: string): Promise<string>;
   approvePairing(code: string, principalId: PrincipalId): Promise<StorageOutcome<void>>;
   revokeBinding(actor: ExternalActor): Promise<void>;

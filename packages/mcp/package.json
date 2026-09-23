@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@vian/core": "workspace:*",
-    "@ai-sdk/mcp": "2.0.55"
+    "@ai-sdk/mcp": "2.0.55",
+    "@vian/tools": "workspace:*"
   }
 }

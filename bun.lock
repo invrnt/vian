@@ -25,6 +25,7 @@
         "@vian/credentials": "workspace:*",
         "@vian/provider-openai-chatgpt": "workspace:*",
         "@vian/storage": "workspace:*",
+        "@vian/tools": "workspace:*",
       },
     },
     "packages/core": {
@@ -55,6 +56,7 @@
       "dependencies": {
         "@ai-sdk/mcp": "2.0.55",
         "@vian/core": "workspace:*",
+        "@vian/tools": "workspace:*",
       },
     },
     "packages/provider-google": {
