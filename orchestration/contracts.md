@@ -12,11 +12,11 @@ Authority: [identity.ts](../packages/core/src/identity.ts), [messages.ts](../pac
 
 ## C03: Storage transactions
 
-API authority: [storage.ts](../packages/core/src/storage.ts), [execution.ts](../packages/core/src/execution.ts). Physical schema and transactional implementation belong to S. State transitions and audit append must share a transaction; started tool work must not replay after a crash. The BotStore port also owns explicit binding/administrator updates, ordered pending-inbound reads, interruption recovery and callback-action consumption.
+API authority: [storage.ts](../packages/core/src/storage.ts), [execution.ts](../packages/core/src/execution.ts). Physical schema and transactional implementation belong to S. State transitions and audit append must share a transaction; started tool work must not replay after a crash. The BotStore port also owns explicit binding/administrator updates, ordered pending-inbound reads, interruption recovery and callback-action consumption. Applying an ordered reset barrier creates a new session only after prior input and the active run settle, with session_reset audit in the same transaction.
 
 ## C04: Gate and delivery
 
-Authority: [gate.ts](../packages/core/src/gate.ts), [delivery.ts](../packages/core/src/delivery.ts). Gates normalize transport events and render/deliver canonical output. Runtime supplies attachment ingest/open and action ports at Gate start, plus bot-scoped attachment open during delivery. Rendered button labels carry opaque action IDs. Actorless group stop updates must be dropped by the Gate. Ambiguous sends remain held; only confirmed failures may retry.
+Authority: [gate.ts](../packages/core/src/gate.ts), [delivery.ts](../packages/core/src/delivery.ts). Gates normalize transport events and render/deliver canonical output. Runtime supplies attachment ingest/open/list and action ports at Gate start, plus bot-scoped attachment open during delivery. Rendered button labels carry opaque action IDs. Actorless group stop updates must be dropped by the Gate. Ambiguous sends remain held; only confirmed failures may retry.
 
 ## C05: Providers and credentials
 

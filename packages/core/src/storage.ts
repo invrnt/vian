@@ -27,6 +27,8 @@ export interface BotStore extends ActionPort {
   claimNext(sessionId: SessionId, holder: string, leaseUntil: string): Promise<StorageOutcome<InboxRecord | undefined>>;
   claimSteeringBatch(runId: RunId, sessionId: SessionId, max: number): Promise<SteeringBatch>;
   appendResetBarrier(conversationId: ConversationId, actor: PrincipalId, inboundId: EventId): Promise<void>;
+  /** Apply an ordered /new barrier only after prior input is consumed and the active run has ended; create the next session and audit session_reset atomically. */
+  applyResetBarrier(conversationId: ConversationId, inboundId: EventId): Promise<StorageOutcome<SessionId>>;
   renewLease(lease: SessionLease): Promise<StorageOutcome<void>>;
   releaseLease(lease: SessionLease): Promise<void>;
   beginRun(runId: RunId, input: InboxRecord, initiator: PrincipalId): Promise<StorageOutcome<void>>;
