@@ -571,6 +571,26 @@ test('summary-tail persists a summary and retains recent context', async () => {
   } finally { await f.close(); }
 });
 
+test('summary failure uses the recent tail without losing the run', async () => {
+  const scripted = new MockLanguageModelV4({
+    doGenerate: async () => { throw new Error('summary provider unavailable'); },
+    doStream: async () => stream(textParts('tail answer')),
+  });
+  const f = await fixture({ model: scripted });
+  try {
+    f.runtime.deps.manifest.context.maxRecentMessages = 2;
+    await seedPriorMessages(f, ['old-one', 'old-two', 'recent-three', 'recent-four']);
+    await f.runtime.start();
+    await f.gate.emit(f.event('current', 'current'));
+    await eventually(async () => f.gate.deliveries.length === 1);
+    expect(f.gate.deliveries[0]?.part.text).toBe('tail answer');
+    expect(await f.store.readSummary((await f.store.resolveDestination(f.destination, f.principal))!.sessionId)).toBeUndefined();
+    const prompt = JSON.stringify(scripted.doStreamCalls[0]?.prompt);
+    expect(prompt).toContain('recent-four');
+    expect(prompt).not.toContain('old-one');
+  } finally { await f.close(); }
+});
+
 test('one bot provider failure does not stop another bot', async () => {
   const broken = await fixture({ model: new MockLanguageModelV4({ doStream: async () => { throw new Error('provider unavailable'); } }) });
   const healthy = await fixture();
