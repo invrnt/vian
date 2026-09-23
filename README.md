@@ -14,11 +14,13 @@ You can give other apps their own bots, each with separate instructions, tools a
 
 ## Install
 
-Prebuilt Linux x64 and arm64 binaries need no Bun or source build. The installer verifies the release checksum and places `vian` in `~/.local/bin` (or the directory given by `--dir`):
+The Linux installer detects Bun. If Bun is installed, it downloads a roughly 1 MB Vian script; otherwise it downloads a standalone x64 or arm64 executable of roughly 80 MB. It verifies the release checksum and installs `vian` in `~/.local/bin` (or the directory given by `--dir`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.1
+curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.2
 ```
+
+Bun must remain installed for the small script to run, including as a user service. Use `--runtime standalone` to choose a self-contained executable even when Bun is installed, or `--runtime bun` to require Bun explicitly.
 
 The preview release has not passed every live release gate; see the [release report](orchestration/release-report.md). A stable release can be installed without `--version`.
 

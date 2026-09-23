@@ -4,10 +4,13 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { CommandContext } from '@vian/core';
 
-export function renderUserUnit(executable: string): string {
-  if (/[\r\n]/.test(executable) || !executable.startsWith('/')) throw new Error('Service executable must be an absolute path');
-  const escaped = executable.replaceAll('%', '%%').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-  const command = /\s|"/.test(escaped) ? `"${escaped}"` : escaped;
+export function renderUserUnit(executable: string, script?: string): string {
+  const quote = (path: string) => {
+    if (/[\r\n]/.test(path) || !path.startsWith('/')) throw new Error('Service command paths must be absolute');
+    const escaped = path.replaceAll('%', '%%').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+    return /\s|"/.test(escaped) ? `"${escaped}"` : escaped;
+  };
+  const command = [quote(executable), ...(script ? [quote(script)] : [])].join(' ');
   return `[Unit]\nDescription=Vian bot daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=${command} daemon\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n`;
 }
 
@@ -24,7 +27,8 @@ export async function serviceCommand(verb: string, context: CommandContext, run 
   if (verb === 'install') {
     if (!options.executable && /\/packages\/cli\/src\/main\.ts$/.test(Bun.main)) throw new Error('Build the standalone Vian executable before installing the service');
     await mkdir(unitDir, { recursive: true, mode: 0o700 });
-    await writeFile(unitPath, renderUserUnit(options.executable ?? process.execPath), { mode: 0o600 });
+    const script = !options.executable && Bun.main.endsWith('.js') ? Bun.main : undefined;
+    await writeFile(unitPath, renderUserUnit(options.executable ?? process.execPath, script), { mode: 0o600 });
     const reload = await run('systemctl', ['--user', 'daemon-reload']);
     if (reload.code) throw new Error(reload.stderr || 'systemctl daemon-reload failed');
     const enabled = await run('systemctl', ['--user', 'enable', 'vian.service']);

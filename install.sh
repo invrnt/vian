@@ -5,13 +5,15 @@ repo=invrnt/vian
 version=latest
 install_dir=${HOME:?HOME is required}/.local/bin
 base_url=
+runtime=auto
 
 usage() {
   cat <<'EOF'
-Usage: sh install.sh [--version TAG] [--dir DIRECTORY] [--repo OWNER/REPO]
+Usage: sh install.sh [--runtime auto|standalone|bun] [--version TAG] [--dir DIRECTORY] [--repo OWNER/REPO]
 
-Install a prebuilt Vian binary in ~/.local/bin by default. Use --dir
-/usr/local/bin with the necessary permissions for a system-wide install.
+Install Vian in ~/.local/bin. By default, use the smaller script when Bun is
+available; otherwise use a standalone binary. Use --dir /usr/local/bin with
+the necessary permissions for a system-wide install.
 EOF
 }
 
@@ -19,9 +21,10 @@ die() { printf 'vian installer: %s\n' "$*" >&2; exit 1; }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --version|--dir|--repo|--base-url)
+    --runtime|--version|--dir|--repo|--base-url)
       [ "$#" -ge 2 ] || die "$1 requires a value"
       case "$1" in
+        --runtime) runtime=$2 ;;
         --version) version=$2 ;;
         --dir) install_dir=$2 ;;
         --repo) repo=$2 ;;
@@ -39,16 +42,25 @@ case "$repo" in
 esac
 case "$version" in ''|*[!A-Za-z0-9._-]*) die 'invalid version' ;; esac
 [ -n "$install_dir" ] || die 'install directory is empty'
+case "$runtime" in auto|standalone|bun) ;; *) die 'runtime must be auto, standalone or bun' ;; esac
 
 [ "$(uname -s)" = Linux ] || die 'prebuilt installation currently supports Linux only'
-case "$(uname -m)" in
-  x86_64|amd64) arch=x64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  *) die "unsupported CPU architecture: $(uname -m)" ;;
-esac
-asset=vian-linux-$arch
-if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
-  asset=$asset-musl
+if [ "$runtime" = auto ]; then
+  if command -v bun >/dev/null 2>&1; then runtime=bun; else runtime=standalone; fi
+fi
+if [ "$runtime" = bun ]; then
+  command -v bun >/dev/null 2>&1 || die 'Bun is required for --runtime bun'
+  asset=vian-bun.js
+else
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) die "unsupported CPU architecture: $(uname -m)" ;;
+  esac
+  asset=vian-linux-$arch
+  if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
+    asset=$asset-musl
+  fi
 fi
 command -v sha256sum >/dev/null 2>&1 || die 'sha256sum is required'
 

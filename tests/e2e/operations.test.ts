@@ -93,6 +93,7 @@ test('service unit and runner use a disposable user directory', async () => {
   const runner = async (command: string, args: string[]) => { calls.push([command, ...args]); return { code: 0, stdout: '', stderr: '' }; };
   try {
     expect(renderUserUnit('/usr/local/bin/vian')).toContain('Restart=on-failure');
+    expect(renderUserUnit('/opt/bun/bin/bun', '/home/user/.local/bin/vian')).toContain('ExecStart=/opt/bun/bin/bun /home/user/.local/bin/vian daemon');
     expect(await serviceCommand('install', context, runner, { unitDir: root, executable: '/usr/local/bin/vian' })).toBe(0);
     expect(await readFile(join(root, 'vian.service'), 'utf8')).toContain('ExecStart=/usr/local/bin/vian daemon');
     expect(calls).toEqual([['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', 'enable', 'vian.service']]);

@@ -26,14 +26,19 @@ jobs:
               --target="bun-$target" --outfile "dist/vian-$target"
           done
           dist/vian-linux-x64 --help >/dev/null
-          (cd dist && sha256sum vian-linux-* > SHA256SUMS)
+          bun build packages/cli/src/main.ts --target=bun --minify --outfile dist/vian-bun-bundle.js
+          { printf '#!/usr/bin/env bun\n'; cat dist/vian-bun-bundle.js; } > dist/vian-bun.js
+          rm dist/vian-bun-bundle.js
+          chmod 755 dist/vian-bun.js
+          (cd /tmp && "$GITHUB_WORKSPACE/dist/vian-bun.js" --help >/dev/null)
+          (cd dist && sha256sum vian-linux-* vian-bun.js > SHA256SUMS)
       - name: Publish tagged release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           flags=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" dist/vian-linux-* dist/SHA256SUMS LICENSE \
+          gh release create "$GITHUB_REF_NAME" dist/vian-linux-* dist/vian-bun.js dist/SHA256SUMS LICENSE \
             --verify-tag --title "$GITHUB_REF_NAME" \
             --notes "Standalone Linux preview binaries. See the release report for unverified live gates." \
             "${flags[@]}"
