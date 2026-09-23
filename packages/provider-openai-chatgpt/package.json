@@ -9,5 +9,8 @@
   "dependencies": {
     "@vian/core": "workspace:*",
     "@ai-sdk/provider": "4.0.17"
+  },
+  "devDependencies": {
+    "@vian/credentials": "workspace:*"
   }
 }
