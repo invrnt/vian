@@ -102,4 +102,18 @@ CREATE TABLE callback_actions (
 ALTER TABLE attachments ADD COLUMN sha256 TEXT;
 ALTER TABLE attachments ADD COLUMN origin TEXT;
 ALTER TABLE attachments ADD COLUMN created_at TEXT;
+`, `
+CREATE TABLE delivery_order (sequence INTEGER PRIMARY KEY AUTOINCREMENT);
+ALTER TABLE outbox ADD COLUMN delivery_sequence INTEGER;
+INSERT INTO delivery_order(sequence) SELECT rowid FROM outbox;
+UPDATE outbox SET delivery_sequence=rowid;
+CREATE TABLE pairing_notices (
+  id TEXT PRIMARY KEY, gate TEXT NOT NULL, external_event_id TEXT NOT NULL,
+  destination_key TEXT NOT NULL, code TEXT NOT NULL REFERENCES pairing_requests(code),
+  part_json TEXT NOT NULL, state TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+  delivery_sequence INTEGER NOT NULL REFERENCES delivery_order(sequence),
+  UNIQUE(gate,external_event_id)
+);
+CREATE INDEX pairing_notices_destination_order ON pairing_notices(destination_key,delivery_sequence);
 `] as const;

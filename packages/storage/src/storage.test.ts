@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
@@ -149,6 +149,8 @@ test('callback single use, revocation, expiry and reset ordering', async () => {
     await f.store.beginRun('run-before' as RunId, earlier.value, principalId);
     const m: CanonicalMessage = { id: 'before-reply' as MessageId, botId, conversationId, sessionId, runId: 'run-before' as RunId, role: 'assistant', parts: [], createdAt: new Date().toISOString() };
     await f.store.completeRun('run-before' as RunId, m, []);
+    const barrier = await f.store.claimNext(sessionId, 'owner', new Date(Date.now()+60000).toISOString());
+    expect(barrier.kind === 'ok' && barrier.value?.id).toBe(reset.value.id);
     const applied = await f.store.applyResetBarrier(conversationId, reset.value.id);
     expect(applied.kind).toBe('ok');
     if (applied.kind === 'ok') expect((await f.store.readPendingInbound(applied.value)).map(r => r.event.externalEventId)).toEqual(['after']);
@@ -216,19 +218,92 @@ test('read-only schema inspection and additive attachment migration preserve leg
   const dir = mkdtempSync(join(tmpdir(), 'vian-schema-'));
   const path = join(dir, 'state.sqlite');
   try {
-    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 2, compatible: false });
+    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 3, compatible: false });
     const db = new Database(path);
     const { botMigrations } = await import('./schema.ts');
     db.run(botMigrations[0]); db.run('PRAGMA user_version=1');
     const publicPart = { id: 'old' as AttachmentId, name: 'old.txt', mimeType: 'text/plain', size: 3 };
     db.query('INSERT INTO attachments(id,public_json,private_path,expires_at) VALUES (?,?,?,?)').run('old', JSON.stringify(publicPart), '/tmp/old', '2099-01-01T00:00:00.000Z');
     db.close();
-    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 2, compatible: true });
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 3, compatible: true });
     const store = new SqliteBotStore(botId, path);
     expect(await store.getAttachmentStorage('old' as any)).toEqual({ public: publicPart, privatePath: '/tmp/old', expiresAt: '2099-01-01T00:00:00.000Z', status: 'available' });
     store.close();
-    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 2, supportedVersion: 2, compatible: true });
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 3, supportedVersion: 3, compatible: true });
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('read-only store leaves old bot database bytes and schema unchanged', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vian-readonly-'));
+  const path = join(dir, 'state.sqlite');
+  try {
+    const db = new Database(path);
+    const { botMigrations } = await import('./schema.ts');
+    db.run(botMigrations[0]); db.run('PRAGMA user_version=1'); db.close();
+    const before = readFileSync(path);
+    const store = new SqliteBotStore(botId, path, { readonly: true });
+    expect(await store.listSessions()).toEqual([]);
+    const history = [];
+    for await (const event of store.history({})) history.push(event);
+    expect(history).toEqual([]);
+    store.close();
+    expect(readFileSync(path).equals(before)).toBe(true);
+    expect(inspectBotSchema(path).currentVersion).toBe(1);
+    expect(() => new SqliteBotStore(botId, join(dir, 'missing.sqlite'), { readonly: true })).toThrow();
+    expect(existsSync(join(dir, 'missing.sqlite'))).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('unknown private pairing notice is durable, deduplicated and ordered', async () => {
+  const f = fixture();
+  try {
+    const unknown = { gate: 'telegram' as const, externalId: '999' };
+    const privateEvent: InboundEvent = { ...event('unknown-1'), actor: unknown, destination: unknown };
+    const expiry = new Date(Date.now()+60000).toISOString();
+    expect((await f.store.createPairingNotice(privateEvent, expiry)).kind).toBe('ok');
+    expect((await f.store.createPairingNotice(privateEvent, expiry)).kind).toBe('duplicate');
+    const second = { ...privateEvent, externalEventId: 'unknown-2' };
+    expect((await f.store.createPairingNotice(second, expiry)).kind).toBe('ok');
+    const notices = await f.store.listDeliveries(unknown);
+    expect(notices).toHaveLength(2);
+    expect(notices[0]?.part.text?.startsWith('Pairing code: ')).toBe(true);
+    expect(notices[0]?.part.text).toBe(notices[1]?.part.text);
+    expect((await f.store.updateDelivery(notices[1]!.id, 'sending')).kind).toBe('invalid-transition');
+    expect((await f.store.updateDelivery(notices[0]!.id, 'sending')).kind).toBe('ok');
+    expect((await f.store.updateDelivery(notices[0]!.id, 'succeeded', { receipt: { externalId: 'tg', sentAt: new Date().toISOString() } })).kind).toBe('ok');
+    expect(await f.store.resolveActor(unknown)).toBeUndefined();
+    const code = notices[0]!.part.text!.split('\n')[0]!.replace('Pairing code: ', '');
+    expect((await f.store.approvePairing(code, principalId)).kind).toBe('ok');
+    expect(await f.store.resolveActor(unknown)).toBe(principalId);
+    expect((await f.store.approvePairing(code, principalId)).kind).toBe('invalid-transition');
+    expect((await f.store.listDeliveries(unknown))[1]?.state).toBe('failed-terminal');
+    expect((await f.store.updateDelivery(notices[1]!.id, 'sending')).kind).toBe('invalid-transition');
+    f.store.close();
+    const reopened = new SqliteBotStore(botId, f.path);
+    expect(await reopened.recoverInterrupted()).toBe(0);
+    expect((await reopened.listDeliveries(unknown))[1]?.state).toBe('failed-terminal');
+    reopened.close();
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('rejected queued input is consumed once and audited without a run', async () => {
+  const f = fixture();
+  try {
+    const sessionId = await ready(f.store);
+    const accepted = await f.store.acceptInbound(event('revoke-me'));
+    if (accepted.kind !== 'ok') throw new Error('accept failed');
+    expect((await f.store.rejectInbound(accepted.value.id, 'Actor binding revoked')).kind).toBe('ok');
+    expect((await f.store.rejectInbound(accepted.value.id, 'Actor binding revoked')).kind).toBe('invalid-transition');
+    expect(await f.store.readPendingInbound(sessionId)).toEqual([]);
+    const history = [];
+    for await (const row of f.store.history({ sessionId })) history.push(row.kind);
+    expect(history).toContain('inbound_rejected');
+    expect(history).not.toContain('run_started');
+    const reset = await f.store.acceptInbound({ ...event('rejected-reset'), kind: 'control', control: 'new' });
+    if (reset.kind !== 'ok') throw new Error('reset not accepted');
+    expect((await f.store.rejectInbound(reset.value.id, 'Actor binding revoked')).kind).toBe('ok');
+    expect((await f.store.applyResetBarrier(conversationId, reset.value.id)).kind).toBe('invalid-transition');
+  } finally { f.cleanup(); }
 });
 
 test('session listing, run terminal audit, authority and /new ordering', async () => {
