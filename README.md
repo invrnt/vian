@@ -1,8 +1,16 @@
 # Vian
 
-Vian runs small, explicit-tool conversational bots from local directories. One daemon hosts the registered bots; each bot keeps its configuration, SQLite history and attachments in its own directory.
+Vian runs Telegram bots that answer in plain language and call only the tools you expose. Each bot has its own directory for configuration, SQLite history and attachments, while one daemon runs the registered bots.
 
-Coding agents working with Vian should follow the short [usage skill](skill.md).
+If a coding agent is setting up a bot for you, give it the [Vian usage skill](skill.md).
+
+## Share a personal app through Telegram
+
+Say you host a small expense-sharing app and want a friend to use it. They could message your Telegram bot, "What do I owe for dinner?" or "Add my half of the taxi fare." You expose only the app operations those requests need, such as `get_balance` and `add_expense`, and approve your friend's Telegram account. Your friend uses the app through chat without a server login or a terminal. You keep hosting the app and its data.
+
+The model sees only the tools you give that bot. Vian does not provide a general shell, unrestricted file access or arbitrary SQL by default. The tools you write run with your local privileges, so they still need input validation and application-level access checks. See [security](docs/security.md) and [tool authoring](docs/tool-authoring.md).
+
+You can give other apps their own bots, each with separate instructions, tools and history. Registering 100 bots does not start 100 Vian processes: one daemon keeps enabled bots available and does no model work for them while they are idle. The 100-bot example describes the process layout, not a measured capacity limit; the current [benchmark](benchmarks/results.md) covers 25 idle bots with fake adapters. Explicitly configured MCP servers may run additional processes.
 
 ## Install
 
