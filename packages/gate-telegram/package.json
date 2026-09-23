@@ -1,0 +1,13 @@
+{
+  "name": "@vian/gate-telegram",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vian/core": "workspace:*",
+    "grammy": "1.46.0"
+  }
+}

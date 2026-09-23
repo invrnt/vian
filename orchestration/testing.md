@@ -83,3 +83,22 @@ Feature implementers own tests within their assigned paths; hardening owns combi
 ## Evidence and readiness
 
 Each handoff records revision, changed paths/interfaces, exact command, result, fixture/environment and blocked/skipped checks. An unavailable credential/environment is BLOCKED, not PASS. Hardening creates `orchestration/release-report.md` only when actual evidence exists, with requirement/check references and readiness conclusion. Any unmet release requirement prevents claiming V1 ready; readiness never authorizes deployment.
+
+## Foundation commands established (2026-09-22)
+
+Runtime pin: Bun 1.4.2 in `.tool-versions`; TypeScript 7.0.2. `bun.lock` contains exact dependency resolution. From the repository root:
+
+```bash
+bun install --frozen-lockfile
+bun run schema
+git diff --exit-code -- schema/v1.json
+bun run typecheck
+bun test
+bun run check
+bun run build
+bun run smoke:foundation
+```
+
+`bun run build` writes `dist/vian`. `smoke:foundation` executes compiled CLI help and compiles a small loader that imports a temporary TypeScript tool with a local TypeScript import from a non-empty temporary bot directory. The temporary binary and bot fixture are removed after the check. `bun run test:foundation` scopes the three initial test files. These commands check the foundation seam only; later owners extend combined tests. The installed SDK 7.0.111 conformance fixture verifies `prepareStep` message injection after a tool-result step without rerunning that tool.
+
+Foundation result at branch revision pending commit: frozen install, schema generation, typecheck, 5 tests, build and smoke passed. Source import review found core imports only `ai` as a type and Zod at runtime; the CLI help bundle reports one module and no eager SDK/provider/Gate import. No live provider, Gate or service checks ran.

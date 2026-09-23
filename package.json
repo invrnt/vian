@@ -1,0 +1,30 @@
+{
+  "name": "vian",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "bun run typecheck && bun test",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build packages/cli/src/main.ts --compile --outfile dist/vian",
+    "schema": "bun scripts/generate-schema.ts",
+    "test:foundation": "bun test packages/core packages/testing packages/cli",
+    "smoke:foundation": "bash scripts/foundation-smoke.sh"
+  },
+  "dependencies": {
+    "ai": "7.0.111",
+    "@ai-sdk/gateway": "4.0.89",
+    "@ai-sdk/google": "4.0.77",
+    "@ai-sdk/mcp": "2.0.55",
+    "grammy": "1.46.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/bun": "1.4.2"
+  }
+}

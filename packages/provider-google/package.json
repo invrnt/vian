@@ -1,0 +1,13 @@
+{
+  "name": "@vian/provider-google",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vian/core": "workspace:*",
+    "@ai-sdk/google": "4.0.77"
+  }
+}
