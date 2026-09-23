@@ -1,4 +1,6 @@
 import type { AttachmentId, BotId } from './identity.ts';
+export interface AttachmentMetadata { sha256: string; origin: 'generated' | 'inbound'; createdAt: string }
+export interface PrivilegedAttachmentRecord { public: PublicAttachment; privatePath: string; expiresAt: string; status: 'available' | 'expired' | 'deleted'; metadata?: AttachmentMetadata }
 export interface PublicAttachment { id: AttachmentId; name: string; mimeType: string; size: number }
 export interface AttachmentRegistration { path: string; name: string; mimeType: string; ttlHours?: number }
 export interface AttachmentIngest { name: string; mimeType: string; size: number; bytes: ReadableStream<Uint8Array> }
