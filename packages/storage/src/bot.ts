@@ -1,12 +1,13 @@
 import { randomUUID, randomBytes } from 'node:crypto';
-import type { Database } from 'bun:sqlite';
+import { Database } from 'bun:sqlite';
+import { existsSync } from 'node:fs';
 import type { BotStore, StorageOutcome, RegistryRecord, InboxRecord, SessionLease, HistoryFilter } from '@vian/core';
 import type { BotId, PrincipalId, ConversationId, SessionId, RunId, ToolCallId, EventId, MessageId, AttachmentId, ActionId, ExternalActor, ExternalDestination, AuthorizedContext, CallbackActionInput, CallbackActionClaim, CallbackActionValue } from '@vian/core';
 import type { AuditEvent, InboundEvent, CanonicalMessage } from '@vian/core';
 import type { OutboxPart, DeliveryState } from '@vian/core';
 import type { PublicAttachment, AttachmentMetadata, PrivilegedAttachmentRecord } from '@vian/core';
 import type { SteeringBatch } from '@vian/core';
-import { openDatabase, migrate, backup } from './sqlite.ts';
+import { openDatabase, migrate, backup, version } from './sqlite.ts';
 import { botMigrations } from './schema.ts';
 
 const now = () => new Date().toISOString();
@@ -14,12 +15,20 @@ const ok = <T>(value: T): StorageOutcome<T> => ({ kind: 'ok', value });
 const invalid = (reason: string): StorageOutcome<never> => ({ kind: 'invalid-transition', reason });
 const key = (destination: ExternalDestination) => JSON.stringify([destination.gate, destination.externalId, destination.threadId ?? '']);
 const json = (value: unknown) => JSON.stringify(value);
+const deliveryTransitions: Record<DeliveryState, DeliveryState[]> = { queued: ['sending','failed-retryable','failed-terminal'], sending: ['succeeded','failed-retryable','failed-terminal','ambiguous'], succeeded: [], 'failed-retryable': ['sending','failed-terminal'], 'failed-terminal': [], ambiguous: [] };
 
 export class SqliteBotStore implements BotStore {
   private db: Database;
-  constructor(readonly botId: BotId, path: string) {
-    this.db = openDatabase(path);
-    migrate(this.db, botMigrations);
+  constructor(readonly botId: BotId, path: string, options: { readonly?: boolean } = {}) {
+    if (options.readonly) {
+      if (!existsSync(path)) throw new Error('Bot SQLite database does not exist');
+      this.db = new Database(path, { readonly: true, strict: true });
+      const current = version(this.db);
+      if (current < 1 || current > botMigrations.length) { this.db.close(); throw new Error(`Unsupported bot SQLite schema ${current}`); }
+    } else {
+      this.db = openDatabase(path);
+      migrate(this.db, botMigrations);
+    }
   }
   private audit(event: Omit<AuditEvent, 'sequence'>): number {
     if (event.botId !== this.botId) throw new Error('Audit event belongs to another bot');
@@ -73,6 +82,28 @@ export class SqliteBotStore implements BotStore {
     this.db.query('INSERT INTO pairing_requests(code,gate,external_id,expires_at) VALUES (?,?,?,?)').run(code, actor.gate, actor.externalId, expiresAt);
     return code;
   }
+  private nextDeliverySequence(): number {
+    this.db.query('INSERT INTO delivery_order DEFAULT VALUES').run();
+    return Number((this.db.query('SELECT last_insert_rowid() id').get() as { id: number }).id);
+  }
+  async createPairingNotice(event: InboundEvent, expiresAt: string): Promise<StorageOutcome<void>> {
+    return this.db.transaction(() => {
+      if (event.kind !== 'message' || event.actor.gate !== event.destination.gate || event.actor.externalId !== event.destination.externalId || event.destination.threadId || expiresAt <= now()) return invalid('Pairing notice requires an unknown private message and future expiry');
+      if (this.db.query('SELECT principal_id FROM actor_bindings WHERE gate=? AND external_id=? AND revoked_at IS NULL').get(event.actor.gate, event.actor.externalId)) return invalid('Actor is already authorized');
+      if (this.db.query('SELECT id FROM inbox WHERE gate=? AND external_event_id=?').get(event.gate, event.externalEventId) || this.db.query('SELECT id FROM pairing_notices WHERE gate=? AND external_event_id=?').get(event.gate, event.externalEventId)) return { kind: 'duplicate' as const, reason: 'Gate event already handled' };
+      const reusable = this.db.query('SELECT code,expires_at FROM pairing_requests WHERE gate=? AND external_id=? AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1').get(event.actor.gate, event.actor.externalId, now()) as { code: string; expires_at: string } | null;
+      let code = reusable?.code;
+      if (!code) {
+        code = randomBytes(12).toString('base64url');
+        this.db.query('INSERT INTO pairing_requests(code,gate,external_id,expires_at) VALUES (?,?,?,?)').run(code, event.actor.gate, event.actor.externalId, expiresAt);
+      }
+      const id = randomUUID();
+      const part: OutboxPart = { id, botId: this.botId, messageId: `pairing:${id}` as MessageId, destination: event.destination, part: { partIndex: 0, kind: 'text', text: `Pairing code: ${code}\nAsk the bot owner to approve this code locally.` }, state: 'queued', attempt: 0 };
+      this.db.query('INSERT INTO pairing_notices(id,gate,external_event_id,destination_key,code,part_json,state,created_at,expires_at,delivery_sequence) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id, event.gate, event.externalEventId, key(event.destination), code, json(part), part.state, now(), reusable?.expires_at ?? expiresAt, this.nextDeliverySequence());
+      this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'pairing_notice_queued', at: now(), payload: { noticeId: id, gate: event.gate, externalEventId: event.externalEventId } });
+      return ok(undefined);
+    }).immediate();
+  }
   async approvePairing(code: string, principalId: PrincipalId): Promise<StorageOutcome<void>> {
     return this.db.transaction(() => {
       const row = this.db.query('SELECT gate,external_id FROM pairing_requests WHERE code=? AND used_at IS NULL AND expires_at > ?').get(code, now()) as { gate: ExternalActor['gate']; external_id: string } | null;
@@ -80,6 +111,11 @@ export class SqliteBotStore implements BotStore {
       this.db.query('UPDATE pairing_requests SET used_at=? WHERE code=?').run(now(), code);
       this.db.query('INSERT OR IGNORE INTO principals(id) VALUES (?)').run(principalId);
       this.db.query('INSERT INTO actor_bindings(gate,external_id,principal_id,created_at,revoked_at) VALUES (?,?,?,?,NULL) ON CONFLICT(gate,external_id) DO UPDATE SET principal_id=excluded.principal_id,revoked_at=NULL').run(row.gate, row.external_id, principalId, now());
+      for (const notice of this.db.query("SELECT id,part_json FROM pairing_notices WHERE code=? AND state IN ('queued','failed-retryable')").all(code) as { id: string; part_json: string }[]) {
+        const part = JSON.parse(notice.part_json) as OutboxPart;
+        part.state = 'failed-terminal'; part.safeError = 'Pairing code was approved';
+        this.db.query("UPDATE pairing_notices SET state='failed-terminal',part_json=? WHERE id=?").run(json(part), notice.id);
+      }
       this.audit({ id: randomUUID() as EventId, botId: this.botId, principalId, kind: 'principal_bound', at: now(), payload: { gate: row.gate, externalId: row.external_id } });
       return ok(undefined);
     }).immediate();
@@ -122,6 +158,16 @@ export class SqliteBotStore implements BotStore {
         this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: ctx.conversation_id, sessionId: ctx.session_id, principalId: principal.principal_id, kind: 'session_reset_requested', at: record.acceptedAt, payload: { inboundId: id, inboxSequence: sequence } });
       }
       return ok(record);
+    }).immediate();
+  }
+  async rejectInbound(inboundId: EventId, reason: string): Promise<StorageOutcome<void>> {
+    return this.db.transaction(() => {
+      const row = this.db.query(`SELECT i.state,i.session_id,s.conversation_id FROM inbox i
+        JOIN sessions s ON s.id=i.session_id WHERE i.id=?`).get(inboundId) as { state: string; session_id: SessionId; conversation_id: ConversationId } | null;
+      if (!row || (row.state !== 'queued' && row.state !== 'claimed')) return invalid('Inbound is unavailable or already consumed');
+      this.db.query("UPDATE inbox SET state='consumed' WHERE id=?").run(inboundId);
+      this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: row.conversation_id, sessionId: row.session_id, kind: 'inbound_rejected', at: now(), payload: { inboundId, reason } });
+      return ok(undefined);
     }).immediate();
   }
   private inbox(row: any): InboxRecord { return { id: row.id, botId: this.botId, event: JSON.parse(row.event_json), sequence: row.sequence, acceptedAt: row.accepted_at, messageId: row.message_id, sessionId: row.session_id }; }
@@ -199,8 +245,8 @@ export class SqliteBotStore implements BotStore {
   }
   async applyResetBarrier(conversationId: ConversationId, inboundId: EventId): Promise<StorageOutcome<SessionId>> {
     return this.db.transaction(() => {
-      const barrier = this.db.query('SELECT inbox_sequence,actor_id,applied_at FROM reset_barriers WHERE id=? AND conversation_id=?').get(inboundId, conversationId) as { inbox_sequence: number; actor_id: PrincipalId; applied_at: string | null } | null;
-      if (!barrier || barrier.applied_at) return invalid('Reset barrier is unavailable or already applied');
+      const barrier = this.db.query('SELECT b.inbox_sequence,b.actor_id,b.applied_at,i.state FROM reset_barriers b JOIN inbox i ON i.id=b.id WHERE b.id=? AND b.conversation_id=?').get(inboundId, conversationId) as { inbox_sequence: number; actor_id: PrincipalId; applied_at: string | null; state: string } | null;
+      if (!barrier || barrier.applied_at || barrier.state !== 'claimed') return invalid('Reset barrier is unavailable, unclaimed or already applied');
       const conversation = this.db.query('SELECT active_session_id FROM conversations WHERE id=?').get(conversationId) as { active_session_id: SessionId } | null;
       if (!conversation) return invalid('Unknown conversation');
       const earlier = this.db.query("SELECT id FROM inbox WHERE session_id=? AND sequence < ? AND state!='consumed' LIMIT 1").get(conversation.active_session_id, barrier.inbox_sequence);
@@ -291,7 +337,7 @@ export class SqliteBotStore implements BotStore {
       this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: finalMessage.conversationId, sessionId: finalMessage.sessionId, runId, kind: 'assistant_message', at: now(), payload: { message: finalMessage } });
       for (const [ordinal, part] of parts.entries()) {
         if (part.messageId !== finalMessage.id || part.botId !== this.botId || part.state !== 'queued') throw new Error('Outbox part/final message mismatch');
-        this.db.query('INSERT INTO outbox(id,message_id,destination_key,ordinal,part_json,state,attempt,next_attempt_at) VALUES (?,?,?,?,?,?,?,?)').run(part.id, finalMessage.id, key(part.destination), ordinal, json(part), part.state, part.attempt, part.nextAttemptAt ?? null);
+        this.db.query('INSERT INTO outbox(id,message_id,destination_key,ordinal,part_json,state,attempt,next_attempt_at,delivery_sequence) VALUES (?,?,?,?,?,?,?,?,?)').run(part.id, finalMessage.id, key(part.destination), ordinal, json(part), part.state, part.attempt, part.nextAttemptAt ?? null, this.nextDeliverySequence());
         this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId: finalMessage.conversationId, sessionId: finalMessage.sessionId, runId, kind: 'delivery_queued', at: now(), payload: { partId: part.id, ordinal } });
       }
       this.db.query("UPDATE runs SET state='completed',ended_at=? WHERE id=?").run(now(), runId);
@@ -301,26 +347,42 @@ export class SqliteBotStore implements BotStore {
   }
   async updateDelivery(partId: string, state: DeliveryState, details: Record<string, unknown> = {}): Promise<StorageOutcome<void>> {
     return this.db.transaction(() => {
-      const row = this.db.query('SELECT part_json,state,attempt FROM outbox WHERE id=?').get(partId) as { part_json: string; state: DeliveryState; attempt: number } | null;
+      const regular = this.db.query('SELECT part_json,state,attempt,delivery_sequence FROM outbox WHERE id=?').get(partId) as { part_json: string; state: DeliveryState; attempt: number; delivery_sequence: number } | null;
+      const pairing = regular ? null : this.db.query('SELECT part_json,state,attempt,delivery_sequence,expires_at FROM pairing_notices WHERE id=?').get(partId) as { part_json: string; state: DeliveryState; attempt: number; delivery_sequence: number; expires_at: string } | null;
+      const row = regular ?? pairing;
       if (!row) return invalid('Unknown outbox part');
-      const transitions: Record<DeliveryState, DeliveryState[]> = { queued: ['sending','failed-retryable','failed-terminal'], sending: ['succeeded','failed-retryable','failed-terminal','ambiguous'], succeeded: [], 'failed-retryable': ['sending','failed-terminal'], 'failed-terminal': [], ambiguous: [] };
-      if (!transitions[row.state].includes(state)) return invalid('Delivery transition is not allowed');
+      if (!deliveryTransitions[row.state].includes(state)) return invalid('Delivery transition is not allowed');
       const part = JSON.parse(row.part_json) as OutboxPart;
       if (state === 'sending') {
-        const earlier = this.db.query("SELECT id FROM outbox WHERE destination_key=? AND rowid < (SELECT rowid FROM outbox WHERE id=?) AND state NOT IN ('succeeded','failed-terminal') LIMIT 1").get(key(part.destination), partId);
+        if (pairing && pairing.expires_at <= now()) {
+          part.state = 'failed-terminal'; part.safeError = 'Pairing code expired before delivery';
+          this.db.query("UPDATE pairing_notices SET state='failed-terminal',part_json=? WHERE id=?").run(json(part), partId);
+          this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'delivery_failed_terminal', at: now(), payload: { partId, reason: part.safeError } });
+          return invalid('Pairing code expired before delivery');
+        }
+        const earlier = this.db.query(`SELECT id FROM (
+          SELECT id,destination_key,state FROM outbox WHERE delivery_sequence<?
+          UNION ALL SELECT id,destination_key,state FROM pairing_notices WHERE delivery_sequence<?
+        ) WHERE destination_key=? AND state NOT IN ('succeeded','failed-terminal') LIMIT 1`).get(row.delivery_sequence, row.delivery_sequence, key(part.destination));
         if (earlier) return invalid('Earlier destination part is unresolved');
       }
       part.state = state; part.attempt += state === 'sending' ? 1 : 0;
       if (typeof details.nextAttemptAt === 'string') part.nextAttemptAt = details.nextAttemptAt;
       if (typeof details.safeError === 'string') part.safeError = details.safeError;
       if (details.receipt && typeof details.receipt === 'object') part.receipt = details.receipt as OutboxPart['receipt'];
-      this.db.query('UPDATE outbox SET part_json=?,state=?,attempt=?,next_attempt_at=? WHERE id=?').run(json(part), state, part.attempt, part.nextAttemptAt ?? null, partId);
+      this.db.query(`UPDATE ${pairing ? 'pairing_notices' : 'outbox'} SET part_json=?,state=?,attempt=?,next_attempt_at=? WHERE id=?`).run(json(part), state, part.attempt, part.nextAttemptAt ?? null, partId);
       this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: `delivery_${state.replaceAll('-','_')}`, at: now(), payload: { partId, ...details } });
       return ok(undefined);
     }).immediate();
   }
   async listDeliveries(destination?: ExternalDestination): Promise<OutboxPart[]> {
-    const rows = destination ? this.db.query('SELECT part_json FROM outbox WHERE destination_key=? ORDER BY rowid').all(key(destination)) : this.db.query('SELECT part_json FROM outbox ORDER BY rowid').all();
+    const rows = destination ? this.db.query(`SELECT part_json FROM (
+      SELECT part_json,delivery_sequence,destination_key FROM outbox
+      UNION ALL SELECT part_json,delivery_sequence,destination_key FROM pairing_notices
+    ) WHERE destination_key=? ORDER BY delivery_sequence`).all(key(destination)) : this.db.query(`SELECT part_json FROM (
+      SELECT part_json,delivery_sequence FROM outbox
+      UNION ALL SELECT part_json,delivery_sequence FROM pairing_notices
+    ) ORDER BY delivery_sequence`).all();
     return (rows as { part_json: string }[]).map(row => JSON.parse(row.part_json));
   }
   async appendSummary(sessionId: SessionId, text: string, throughSequence: number): Promise<void> {
@@ -388,6 +450,14 @@ export class SqliteBotStore implements BotStore {
         this.db.query("UPDATE outbox SET state='ambiguous',part_json=? WHERE id=?").run(json(part), send.id);
         this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'delivery_ambiguous', at: now(), payload: { partId: send.id, reason: part.safeError } });
       }
+      const pairingSends = this.db.query("SELECT id,part_json FROM pairing_notices WHERE state='sending'").all() as { id: string; part_json: string }[];
+      for (const send of pairingSends) {
+        const part = JSON.parse(send.part_json) as OutboxPart;
+        part.state = 'ambiguous'; part.safeError = 'Delivery outcome unknown after process interruption';
+        this.db.query("UPDATE pairing_notices SET state='ambiguous',part_json=? WHERE id=?").run(json(part), send.id);
+        this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'delivery_ambiguous', at: now(), payload: { partId: send.id, reason: part.safeError } });
+      }
+      this.db.query('UPDATE sessions SET lease_holder=NULL,lease_expires_at=NULL WHERE lease_holder IS NOT NULL').run();
       return runs.length;
     }).immediate();
   }
