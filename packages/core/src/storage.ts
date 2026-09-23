@@ -24,6 +24,8 @@ export interface BotStore extends ActionPort {
   bindActor(actor: ExternalActor, principalId: PrincipalId): Promise<void>;
   bindDestination(destination: ExternalDestination, conversationId: ConversationId, initiatorId: PrincipalId): Promise<SessionId>;
   setAdministrator(principalId: PrincipalId, enabled: boolean): Promise<void>;
+  /** Atomically make administrator flags equal the manifest list, including unbound principals; insert configured IDs and audit changed rows. Call before Gate admission. */
+  syncAdministrators(principalIds: PrincipalId[]): Promise<void>;
   appendAudit(event: Omit<AuditEvent, 'sequence'>): Promise<number>;
   recoverInterrupted(): Promise<number>;
   readPendingInbound(sessionId: SessionId): Promise<InboxRecord[]>;
