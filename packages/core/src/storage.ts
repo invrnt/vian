@@ -40,6 +40,10 @@ export interface BotStore extends ActionPort {
   readSummary(sessionId: SessionId): Promise<{ text: string; throughSequence: number } | undefined>;
   registerAttachment(attachment: PublicAttachment, privatePath: string, expiresAt: string): Promise<void>;
   getAttachment(id: AttachmentId): Promise<PublicAttachment | undefined>;
+  /** Privileged bot-local metadata for byte access; never expose privatePath to model or public responses. */
+  getAttachmentStorage(id: AttachmentId): Promise<{ public: PublicAttachment; privatePath: string; expiresAt: string; status: 'available' | 'expired' | 'deleted' } | undefined>;
+  markAttachmentDeleted(id: AttachmentId): Promise<void>;
+  listExpiredAttachments(now: string): Promise<{ id: AttachmentId; privatePath: string }[]>;
   history(filter: HistoryFilter): AsyncIterable<AuditEvent>;
   backup(destinationPath: string): Promise<void>;
   close(): void;
