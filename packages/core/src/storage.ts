@@ -1,7 +1,7 @@
 import type { BotId, ConversationId, EventId, MessageId, PrincipalId, RunId, SessionId, ToolCallId, AttachmentId } from './identity.ts';
 import type { ExternalActor, ExternalDestination, AuthorizedContext } from './identity.ts';
 import type { InboundEvent, AuditEvent, CanonicalMessage } from './messages.ts';
-import type { PublicAttachment } from './attachments.ts';
+import type { AttachmentMetadata, PrivilegedAttachmentRecord, PublicAttachment } from './attachments.ts';
 import type { OutboxPart, DeliveryState } from './delivery.ts';
 import type { SteeringBatch } from './execution.ts';
 import type { ActionPort } from './actions.ts';
@@ -10,8 +10,17 @@ export interface RegistryRecord { id: BotId; alias: string; path: string; regist
 export interface RegistryStore { register(record: RegistryRecord, mode?: 'new' | 'move' | 'clone'): Promise<StorageOutcome<RegistryRecord>>; unregister(botId: BotId): Promise<void>; list(): Promise<RegistryRecord[]>; get(selector: string): Promise<RegistryRecord | undefined>; setEnabled(botId: BotId, enabled: boolean): Promise<void> }
 export interface InboxRecord { id: EventId; botId: BotId; event: InboundEvent; sequence: number; acceptedAt: string; messageId?: MessageId; sessionId?: SessionId }
 export interface SessionLease { sessionId: SessionId; holder: string; expiresAt: string }
+export interface SessionSummary { id: SessionId; conversationId: ConversationId; initiatorId: PrincipalId; createdAt: string; lastActiveAt: string; messageCount: number; state: 'active' | 'inactive' }
+export interface BotSchemaInspection { currentVersion: number; supportedVersion: number; compatible: boolean }
+/** Implemented as a read-only standalone storage export. It must not create or migrate a database. */
+export type InspectBotSchema = (path: string) => BotSchemaInspection;
 export interface HistoryFilter { sessionId?: SessionId; principalId?: PrincipalId; since?: string; toolsOnly?: boolean; afterSequence?: number; limit?: number }
 export interface BotStore extends ActionPort {
+  listSessions(): Promise<SessionSummary[]>;
+  /** Includes queued inbox and unapplied reset barriers for restart scheduling. */
+  listReadySessions(): Promise<SessionId[]>;
+  /** Trusted current authority; undefined when the principal/conversation is not bound. */
+  controlAuthority(conversationId: ConversationId, principalId: PrincipalId): Promise<{ isAdministrator: boolean; sessionInitiatorId: PrincipalId; activeRunInitiatorId?: PrincipalId } | undefined>;
   bindActor(actor: ExternalActor, principalId: PrincipalId): Promise<void>;
   bindDestination(destination: ExternalDestination, conversationId: ConversationId, initiatorId: PrincipalId): Promise<SessionId>;
   setAdministrator(principalId: PrincipalId, enabled: boolean): Promise<void>;
@@ -34,14 +43,16 @@ export interface BotStore extends ActionPort {
   beginRun(runId: RunId, input: InboxRecord, initiator: PrincipalId): Promise<StorageOutcome<void>>;
   transitionTool(callId: ToolCallId, runId: RunId, state: 'pending' | 'started' | 'succeeded' | 'failed' | 'interrupted', audit: Record<string, unknown>): Promise<StorageOutcome<void>>;
   completeRun(runId: RunId, finalMessage: CanonicalMessage, parts: OutboxPart[]): Promise<StorageOutcome<void>>;
+  /** Terminal transition and safe audit without creating a fictitious assistant final. */
+  finishRun(runId: RunId, state: 'failed' | 'cancelled', audit: Record<string, unknown>): Promise<StorageOutcome<void>>;
   updateDelivery(partId: string, state: DeliveryState, details?: Record<string, unknown>): Promise<StorageOutcome<void>>;
   listDeliveries(destination?: ExternalDestination): Promise<OutboxPart[]>;
   appendSummary(sessionId: SessionId, text: string, throughSequence: number): Promise<void>;
   readSummary(sessionId: SessionId): Promise<{ text: string; throughSequence: number } | undefined>;
-  registerAttachment(attachment: PublicAttachment, privatePath: string, expiresAt: string): Promise<void>;
+  registerAttachment(attachment: PublicAttachment, privatePath: string, expiresAt: string, metadata: AttachmentMetadata): Promise<void>;
   getAttachment(id: AttachmentId): Promise<PublicAttachment | undefined>;
   /** Privileged bot-local metadata for byte access; never expose privatePath to model or public responses. */
-  getAttachmentStorage(id: AttachmentId): Promise<{ public: PublicAttachment; privatePath: string; expiresAt: string; status: 'available' | 'expired' | 'deleted' } | undefined>;
+  getAttachmentStorage(id: AttachmentId): Promise<PrivilegedAttachmentRecord | undefined>;
   markAttachmentDeleted(id: AttachmentId): Promise<void>;
   listExpiredAttachments(now: string): Promise<{ id: AttachmentId; privatePath: string }[]>;
   history(filter: HistoryFilter): AsyncIterable<AuditEvent>;
