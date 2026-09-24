@@ -50,6 +50,8 @@ Ship reproducible standalone build, MIT license and adapted-code notices; concis
 
 Acceptance: Clean install from artifact on fresh Linux, execute documented setup and example flows, audit dependency licenses and notices; source/lock/build agree and no secrets ship.
 
+Assumption: `vian update` selects the newest published release with the required asset and checksum, including prereleases, because previews are currently the only available releases. It preserves the installed runtime format by default; explicit tag and runtime flags allow a deliberate choice. Validate selection and replacement with offline release fixtures and confirm against a published release before claiming live update compatibility.
+
 ## V043: Release verification
 
 Source: PRD §§59–63, 67–68.
@@ -57,4 +59,3 @@ Source: PRD §§59–63, 67–68.
 Verify all source definition-of-done items, mandatory concurrency scenarios, fakes/golden transcripts, architecture invariants and first fake vertical slice before live integration. Readiness requires coverage and genuine evidence.
 
 Acceptance: Testing.md release gates pass or are explicitly blocked. Every requirement has one primary owner and evidence; all 15 §68 invariants are asserted by tests/review; no deployment is implied.
-

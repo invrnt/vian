@@ -24,6 +24,8 @@ Bun must remain installed for the small script to run, including as a user servi
 
 The preview release has not passed every live release gate; see the [release report](orchestration/release-report.md). A stable release can be installed without `--version`.
 
+To update the installed command, run `vian update`. It selects the newest published release with an asset for your Linux runtime and architecture, including preview releases. The update keeps your current Bun script or standalone format by default, verifies `SHA256SUMS`, checks that the downloaded command runs, and replaces the command at its installed location. Use `vian update --version v0.1.0-preview.3` for a specific tag, or `--runtime bun|standalone` to change formats. Bun must be installed to choose `bun`. A running daemon keeps using its old code until you restart it with `vian service restart` or restart the terminal daemon.
+
 ## First bot
 
 Choose a provider and model available to your account:
