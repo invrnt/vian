@@ -13,6 +13,6 @@
 | H | integrated; release blocked | codex/vian-hardening `/home/jc/dev/personal/vian-hardening` | 4fca0e7 | frozen install, schema/build/smoke, 106 tests and 648 assertions; T08 report | 92e1152 | live Telegram, Gateway, Gemini, fresh Linux install, 25 connected bots unavailable |
 
 | linux_local | running | codex/linux-local `/home/jc/dev/freelancer/SlideGenerator-linux-local` | — | — | — | — |
-| vian_update | running | codex/vian-update `/home/jc/dev/personal/vian-update` | — | — | — | — |
+| vian_update | integrated | codex/vian-update `/home/jc/dev/personal/vian-update` | 5322aec | 116 tests, build, compiled help, live Bun-script update at 5322aec | 3484d2f | standalone/service update unverified |
 | vian_skill | integrated | codex/vian-skill `/home/jc/dev/personal/vian-skill` | 938fa41 | frozen install, 14 CLI tests, diff check at 938fa41 | 05ce1cf | — |
 | telegram_verify | running | codex/vian-pairing `/home/jc/dev/personal/vian-pairing` | — | — | — | — |
