@@ -15,4 +15,4 @@
 | linux_local | running | codex/linux-local `/home/jc/dev/freelancer/SlideGenerator-linux-local` | — | — | — | — |
 | vian_update | integrated | codex/vian-update `/home/jc/dev/personal/vian-update` | 5322aec | 116 tests, build, compiled help, live Bun-script update at 5322aec | 3484d2f | standalone/service update unverified |
 | vian_skill | integrated | codex/vian-skill `/home/jc/dev/personal/vian-skill` | 938fa41 | frozen install, 14 CLI tests, diff check at 938fa41 | 05ce1cf | — |
-| telegram_verify | running | codex/vian-pairing `/home/jc/dev/personal/vian-pairing` | — | — | — | — |
+| telegram_verify | integrated | codex/vian-pairing `/home/jc/dev/personal/vian-pairing` | 00b43d4 | 116 branch tests; combined 120 tests, build, smoke at 163dcd9 | 163dcd9 | live Telegram unverified |
