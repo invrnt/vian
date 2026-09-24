@@ -34,7 +34,7 @@ export interface LoadedNativeTools { tools: NativeToolSet; dispose(): Promise<vo
 export async function loadNativeTools(botRoot: string, relativePath: string): Promise<LoadedNativeTools> {
   const source = resolve(botRoot, relativePath);
   if (isAbsolute(relativePath) || !(source === botRoot || source.startsWith(resolve(botRoot) + '/'))) throw new Error('Tool module must be inside bot root');
-  const built = await Bun.build({ entrypoints: [source], target: 'bun', format: 'esm', packages: 'external', throw: false });
+  const built = await Bun.build({ entrypoints: [source], target: 'bun', format: 'esm', packages: 'external', define: { __VIAN_BOT_ROOT__: JSON.stringify(resolve(botRoot)) }, throw: false });
   if (!built.success || built.outputs.length !== 1) throw new Error(`Tool build failed: ${built.logs.map(x => x.message).join('; ')}`);
   const dir = await mkdtemp(join(tmpdir(), 'vian-tools-'));
   try {

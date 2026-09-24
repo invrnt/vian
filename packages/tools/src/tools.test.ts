@@ -25,6 +25,9 @@ test('native import, schema, local dependency reload and last-valid retention', 
     expect(await runtime.execute('hello', { name: 'x' }, context)).toEqual({ ok: true, value: 2 });
     expect(() => validateNativeToolSet({ bad: { description: 'bad', inputSchema: { type: 'object', unsupported: true }, execute() {} } })).toThrow();
     expect(() => assertUniqueToolNames([['hello'], ['hello']])).toThrow('Duplicate exposed tool name');
+    await writeFile(join(root, 'vian.tools.ts'), `declare const __VIAN_BOT_ROOT__: string; export default { where: { description: 'root', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, execute() { return __VIAN_BOT_ROOT__; } } };`);
+    await runtime.reload();
+    expect(await runtime.execute('where', {}, context)).toEqual({ ok: true, value: root });
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 

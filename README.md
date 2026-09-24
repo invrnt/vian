@@ -17,7 +17,7 @@ You can give other apps their own bots, each with separate instructions, tools a
 The Linux installer detects Bun. If Bun is installed, it downloads a roughly 1 MB Vian script; otherwise it downloads a standalone x64 or arm64 executable of roughly 80 MB. It verifies the release checksum and installs `vian` in `~/.local/bin` (or the directory given by `--dir`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.2
+curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.3
 ```
 
 Bun must remain installed for the small script to run, including as a user service. Use `--runtime standalone` to choose a self-contained executable even when Bun is installed, or `--runtime bun` to require Bun explicitly.
@@ -34,6 +34,8 @@ vian auth login openai-chatgpt
 ```
 
 `init` keeps existing files and creates `vian.json`, `VIAN.md`, `vian.tools.ts`, `.env` and `.vian/` when needed. Each bot selects a provider and model. ChatGPT OAuth and Google/Gateway API-key profiles are global; Telegram credentials belong to each bot. The model ID shown above was validated against a ChatGPT subscription on 2026-09-23; availability can change.
+
+For a bot already present in a downloaded project, run `vian init <bot-directory>` to fill missing local files and register it in the user's global index. If it is already initialized, `vian register <bot-directory>` just registers its existing identity. Set that bot's Telegram token locally; provider profiles already stored on this device are shared.
 
 For Google or Gateway, run `vian auth set google` or `vian auth set vercel-ai-gateway` once, then select that provider and a verified model during `init`. These commands take keys through hidden prompts. Existing bot-local `env:` references still work.
 

@@ -40,5 +40,5 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" dist/vian-linux-* dist/vian-bun.js dist/SHA256SUMS LICENSE \
             --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes "Standalone Linux preview binaries. See the release report for unverified live gates." \
+            --notes "Linux preview binaries and Bun script. See the release report for unverified live gates." \
             "${flags[@]}"
