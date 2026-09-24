@@ -14,5 +14,5 @@
 
 | linux_local | running | codex/linux-local `/home/jc/dev/freelancer/SlideGenerator-linux-local` | — | — | — | — |
 | vian_update | running | codex/vian-update `/home/jc/dev/personal/vian-update` | — | — | — | — |
-| vian_skill | running | codex/vian-skill `/home/jc/dev/personal/vian-skill` | — | — | — | — |
+| vian_skill | integrated | codex/vian-skill `/home/jc/dev/personal/vian-skill` | 938fa41 | frozen install, 14 CLI tests, diff check at 938fa41 | 05ce1cf | — |
 | telegram_verify | running | codex/vian-pairing `/home/jc/dev/personal/vian-pairing` | — | — | — | — |
