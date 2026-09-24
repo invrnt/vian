@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { Database } from 'bun:sqlite';
 import { existsSync } from 'node:fs';
 import type { BotStore, StorageOutcome, RegistryRecord, InboxRecord, SessionLease, HistoryFilter } from '@vian/core';
@@ -15,6 +15,7 @@ const ok = <T>(value: T): StorageOutcome<T> => ({ kind: 'ok', value });
 const invalid = (reason: string): StorageOutcome<never> => ({ kind: 'invalid-transition', reason });
 const key = (destination: ExternalDestination) => JSON.stringify([destination.gate, destination.externalId, destination.threadId ?? '']);
 const json = (value: unknown) => JSON.stringify(value);
+const codeHash = (code: string) => createHash('sha256').update(code).digest('hex');
 const deliveryTransitions: Record<DeliveryState, DeliveryState[]> = { queued: ['sending','failed-retryable','failed-terminal'], sending: ['succeeded','failed-retryable','failed-terminal','ambiguous'], succeeded: [], 'failed-retryable': ['sending','failed-terminal'], 'failed-terminal': [], ambiguous: [] };
 
 export class SqliteBotStore implements BotStore {
@@ -103,6 +104,51 @@ export class SqliteBotStore implements BotStore {
   async listPendingPairings(): Promise<Array<{ code: string; actor: ExternalActor; expiresAt: string }>> {
     return (this.db.query('SELECT code,gate,external_id,expires_at FROM pairing_requests WHERE used_at IS NULL AND expires_at>? ORDER BY expires_at,code').all(now()) as { code: string; gate: ExternalActor['gate']; external_id: string; expires_at: string }[]).map(row => ({ code: row.code, actor: { gate: row.gate, externalId: row.external_id }, expiresAt: row.expires_at }));
   }
+  async createOwnerVerification(principalId: PrincipalId, expiresAt: string): Promise<{ code: string; expiresAt: string }> {
+    const duration = Date.parse(expiresAt) - Date.now();
+    if (!principalId || !Number.isFinite(duration) || duration < 1_000 || duration > 30 * 60_000) throw new Error('Verification expiry must be within 30 minutes');
+    const code = this.db.transaction(() => {
+      // One active owner code per bot avoids competing invitations and keeps the legacy path unambiguous.
+      this.db.query('UPDATE owner_verifications SET expires_at=? WHERE used_at IS NULL AND expires_at>?').run(now(), now());
+      let code: string;
+      do { code = randomBytes(6).toString('hex').toUpperCase(); }
+      while (this.db.query('SELECT 1 FROM owner_verifications WHERE code_hash=?').get(codeHash(code)));
+      this.db.query('INSERT INTO owner_verifications(code_hash,principal_id,created_at,expires_at) VALUES (?,?,?,?)').run(codeHash(code), principalId, now(), expiresAt);
+      return code;
+    }).immediate();
+    return { code, expiresAt };
+  }
+  async ownerVerificationStatus(code: string): Promise<{ state: 'pending' | 'used' | 'expired' | 'missing'; actorId?: string; principalId?: PrincipalId }> {
+    const row = this.db.query('SELECT principal_id,expires_at,used_at,actor_id FROM owner_verifications WHERE code_hash=?').get(codeHash(code)) as { principal_id: PrincipalId; expires_at: string; used_at: string | null; actor_id: string | null } | null;
+    if (!row) return { state: 'missing' };
+    if (row.used_at) return { state: 'used', actorId: row.actor_id!, principalId: row.principal_id };
+    return { state: row.expires_at > now() ? 'pending' : 'expired' };
+  }
+  async consumeOwnerVerification(event: InboundEvent): Promise<'matched' | 'blocked' | 'none'> {
+    if (event.kind !== 'message' || event.gate !== 'telegram' || event.actor.gate !== 'telegram' || event.destination.gate !== 'telegram' || event.destination.externalId !== event.actor.externalId || event.destination.threadId || !/^[1-9]\d*$/.test(event.actor.externalId)) return 'none';
+    return this.db.transaction(() => {
+      if (!this.db.query('SELECT 1 FROM owner_verifications WHERE used_at IS NULL AND expires_at>? LIMIT 1').get(now())) return 'none';
+      this.db.query('DELETE FROM owner_verification_events WHERE received_at<?').run(new Date(Date.now() - 30 * 60_000).toISOString());
+      this.db.query('DELETE FROM owner_verification_attempts WHERE window_start<?').run(new Date(Date.now() - 10 * 60_000).toISOString());
+      if (this.db.query('SELECT 1 FROM owner_verification_events WHERE external_event_id=?').get(event.externalEventId)) return 'blocked';
+      const globalAttempts = this.db.query('SELECT COUNT(*) count FROM owner_verification_events WHERE received_at>?').get(new Date(Date.now() - 10 * 60_000).toISOString()) as { count: number };
+      if (globalAttempts.count >= 100) return 'blocked';
+      this.db.query('INSERT INTO owner_verification_events(external_event_id,received_at) VALUES (?,?)').run(event.externalEventId, now());
+      const attempt = this.db.query('SELECT window_start,count FROM owner_verification_attempts WHERE actor_id=?').get(event.actor.externalId) as { window_start: string; count: number } | null;
+      const start = !attempt || Date.now() - Date.parse(attempt.window_start) >= 10 * 60_000 ? now() : attempt.window_start;
+      const count = start === attempt?.window_start ? attempt.count + 1 : 1;
+      this.db.query('INSERT INTO owner_verification_attempts(actor_id,window_start,count) VALUES (?,?,?) ON CONFLICT(actor_id) DO UPDATE SET window_start=excluded.window_start,count=excluded.count').run(event.actor.externalId, start, count);
+      if (count > 5) return 'blocked';
+      const code = event.parts?.length === 1 && event.parts[0]?.type === 'text' ? event.parts[0].text.trim() : '';
+      if (!/^[A-F0-9]{12}$/.test(code)) return 'blocked';
+      const row = this.db.query('SELECT principal_id FROM owner_verifications WHERE code_hash=? AND used_at IS NULL AND expires_at>?').get(codeHash(code), now()) as { principal_id: PrincipalId } | null;
+      if (!row) return 'blocked';
+      if (this.db.query('SELECT 1 FROM actor_bindings WHERE gate=? AND external_id=? AND revoked_at IS NULL').get('telegram', event.actor.externalId)) return 'blocked';
+      this.db.query('UPDATE owner_verifications SET used_at=?,actor_id=? WHERE code_hash=? AND used_at IS NULL').run(now(), event.actor.externalId, codeHash(code));
+      this.bindApprovedActor(event.actor, row.principal_id);
+      return 'matched';
+    }).immediate();
+  }
   async listActorBindings(): Promise<Array<{ actor: ExternalActor; principalId: PrincipalId; isAdministrator: boolean; createdAt: string }>> {
     return (this.db.query(`SELECT b.gate,b.external_id,b.principal_id,b.created_at,p.is_admin
       FROM actor_bindings b JOIN principals p ON p.id=b.principal_id
@@ -114,6 +160,7 @@ export class SqliteBotStore implements BotStore {
   }
   async createPairingNotice(event: InboundEvent, expiresAt: string): Promise<StorageOutcome<void>> {
     return this.db.transaction(() => {
+      if (this.db.query('SELECT 1 FROM owner_verifications WHERE used_at IS NULL AND expires_at>? LIMIT 1').get(now())) return invalid('Owner verification is pending');
       if (event.kind !== 'message' || event.actor.gate !== event.destination.gate || event.actor.externalId !== event.destination.externalId || event.destination.threadId || expiresAt <= now()) return invalid('Pairing notice requires an unknown private message and future expiry');
       if (this.db.query('SELECT principal_id FROM actor_bindings WHERE gate=? AND external_id=? AND revoked_at IS NULL').get(event.actor.gate, event.actor.externalId)) return invalid('Actor is already authorized');
       if (this.db.query('SELECT id FROM inbox WHERE gate=? AND external_event_id=?').get(event.gate, event.externalEventId) || this.db.query('SELECT id FROM pairing_notices WHERE gate=? AND external_event_id=?').get(event.gate, event.externalEventId)) return { kind: 'duplicate' as const, reason: 'Gate event already handled' };
@@ -135,31 +182,34 @@ export class SqliteBotStore implements BotStore {
       const row = this.db.query('SELECT gate,external_id FROM pairing_requests WHERE code=? AND used_at IS NULL AND expires_at > ?').get(code, now()) as { gate: ExternalActor['gate']; external_id: string } | null;
       if (!row) return invalid('Pairing code is invalid, expired or used');
       this.db.query('UPDATE pairing_requests SET used_at=? WHERE code=?').run(now(), code);
-      this.db.query('INSERT OR IGNORE INTO principals(id) VALUES (?)').run(principalId);
-      this.db.query('INSERT INTO actor_bindings(gate,external_id,principal_id,created_at,revoked_at) VALUES (?,?,?,?,NULL) ON CONFLICT(gate,external_id) DO UPDATE SET principal_id=excluded.principal_id,revoked_at=NULL').run(row.gate, row.external_id, principalId, now());
-      const privateBinding = this.db.query(`SELECT d.conversation_id,c.initiator_id FROM destination_bindings d
-        JOIN conversations c ON c.id=d.conversation_id
-        WHERE d.gate=? AND d.external_id=? AND d.thread_id=''`).get(row.gate, row.external_id) as { conversation_id: ConversationId; initiator_id: PrincipalId } | null;
-      if (!privateBinding || privateBinding.initiator_id !== principalId) {
-        const conversationId = randomUUID() as ConversationId;
-        const sessionId = randomUUID() as SessionId;
-        this.db.query('INSERT INTO conversations(id,initiator_id,active_session_id,created_at) VALUES (?,?,?,?)').run(conversationId, principalId, sessionId, now());
-        this.db.query('INSERT INTO sessions(id,conversation_id,initiator_id,created_at) VALUES (?,?,?,?)').run(sessionId, conversationId, principalId, now());
-        this.db.query(`INSERT INTO destination_bindings(gate,external_id,thread_id,conversation_id,created_at,revoked_at)
-          VALUES (?,?,?,?,?,NULL) ON CONFLICT(gate,external_id,thread_id)
-          DO UPDATE SET conversation_id=excluded.conversation_id,created_at=excluded.created_at,revoked_at=NULL`).run(row.gate, row.external_id, '', conversationId, now());
-        this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId, sessionId, principalId, kind: 'conversation_created', at: now(), payload: {} });
-      } else {
-        this.db.query("UPDATE destination_bindings SET revoked_at=NULL WHERE gate=? AND external_id=? AND thread_id=''").run(row.gate, row.external_id);
-      }
+      this.bindApprovedActor({ gate: row.gate, externalId: row.external_id }, principalId);
       for (const notice of this.db.query("SELECT id,part_json FROM pairing_notices WHERE code=? AND state IN ('queued','failed-retryable')").all(code) as { id: string; part_json: string }[]) {
         const part = JSON.parse(notice.part_json) as OutboxPart;
         part.state = 'failed-terminal'; part.safeError = 'Pairing code was approved';
         this.db.query("UPDATE pairing_notices SET state='failed-terminal',part_json=? WHERE id=?").run(json(part), notice.id);
       }
-      this.audit({ id: randomUUID() as EventId, botId: this.botId, principalId, kind: 'principal_bound', at: now(), payload: { gate: row.gate, externalId: row.external_id } });
       return ok(undefined);
     }).immediate();
+  }
+  private bindApprovedActor(actor: ExternalActor, principalId: PrincipalId): void {
+    this.db.query('INSERT OR IGNORE INTO principals(id) VALUES (?)').run(principalId);
+    this.db.query('INSERT INTO actor_bindings(gate,external_id,principal_id,created_at,revoked_at) VALUES (?,?,?,?,NULL) ON CONFLICT(gate,external_id) DO UPDATE SET principal_id=excluded.principal_id,revoked_at=NULL').run(actor.gate, actor.externalId, principalId, now());
+    const privateBinding = this.db.query(`SELECT d.conversation_id,c.initiator_id FROM destination_bindings d
+      JOIN conversations c ON c.id=d.conversation_id
+      WHERE d.gate=? AND d.external_id=? AND d.thread_id=''`).get(actor.gate, actor.externalId) as { conversation_id: ConversationId; initiator_id: PrincipalId } | null;
+    if (!privateBinding || privateBinding.initiator_id !== principalId) {
+      const conversationId = randomUUID() as ConversationId;
+      const sessionId = randomUUID() as SessionId;
+      this.db.query('INSERT INTO conversations(id,initiator_id,active_session_id,created_at) VALUES (?,?,?,?)').run(conversationId, principalId, sessionId, now());
+      this.db.query('INSERT INTO sessions(id,conversation_id,initiator_id,created_at) VALUES (?,?,?,?)').run(sessionId, conversationId, principalId, now());
+      this.db.query(`INSERT INTO destination_bindings(gate,external_id,thread_id,conversation_id,created_at,revoked_at)
+        VALUES (?,?,?,?,?,NULL) ON CONFLICT(gate,external_id,thread_id)
+        DO UPDATE SET conversation_id=excluded.conversation_id,created_at=excluded.created_at,revoked_at=NULL`).run(actor.gate, actor.externalId, '', conversationId, now());
+      this.audit({ id: randomUUID() as EventId, botId: this.botId, conversationId, sessionId, principalId, kind: 'conversation_created', at: now(), payload: {} });
+    } else {
+      this.db.query("UPDATE destination_bindings SET revoked_at=NULL WHERE gate=? AND external_id=? AND thread_id=''").run(actor.gate, actor.externalId);
+    }
+    this.audit({ id: randomUUID() as EventId, botId: this.botId, principalId, kind: 'principal_bound', at: now(), payload: { gate: actor.gate, externalId: actor.externalId } });
   }
   async revokeBinding(actor: ExternalActor): Promise<void> {
     this.db.transaction(() => {

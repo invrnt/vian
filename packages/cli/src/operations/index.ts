@@ -21,7 +21,8 @@ async function service(args: string[], context: CommandContext): Promise<number>
 
 async function access(args: string[], context: CommandContext): Promise<void> {
   const [verb, selector, code] = args;
-  if (!verb || !selector) throw new Error('Usage: vian access list|pending|approve|revoke <bot> [code|principal]');
+  if (!verb || !selector) throw new Error('Usage: vian access verify|list|pending|approve|revoke <bot> [code|principal]');
+  if (verb === 'verify') { const { verifyAccess } = await import('./access.ts'); await verifyAccess(args.slice(1), context); return; }
   const record = await findBot(selector);
   const store = new SqliteBotStore(record.id, join(record.path, '.vian/state.sqlite'));
   try {

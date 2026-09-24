@@ -12,6 +12,7 @@ const conversationId = 'conversation-1' as ConversationId;
 const actor = { gate: 'telegram' as const, externalId: '123' };
 const destination = { gate: 'telegram' as const, externalId: '456' };
 const event = (id: string): InboundEvent => ({ gate: 'telegram', externalEventId: id, actor, destination, receivedAt: new Date().toISOString(), kind: 'message', parts: [{ type: 'text', text: id }] });
+const privateCode = (id: string, code: string, sender = '999'): InboundEvent => ({ ...event(id), actor: { gate: 'telegram', externalId: sender }, destination: { gate: 'telegram', externalId: sender }, parts: [{ type: 'text', text: code }] });
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'vian-storage-'));
   const path = join(dir, 'state.sqlite');
@@ -218,18 +219,18 @@ test('read-only schema inspection and additive attachment migration preserve leg
   const dir = mkdtempSync(join(tmpdir(), 'vian-schema-'));
   const path = join(dir, 'state.sqlite');
   try {
-    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 3, compatible: false });
+    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 4, compatible: false });
     const db = new Database(path);
     const { botMigrations } = await import('./schema.ts');
     db.run(botMigrations[0]); db.run('PRAGMA user_version=1');
     const publicPart = { id: 'old' as AttachmentId, name: 'old.txt', mimeType: 'text/plain', size: 3 };
     db.query('INSERT INTO attachments(id,public_json,private_path,expires_at) VALUES (?,?,?,?)').run('old', JSON.stringify(publicPart), '/tmp/old', '2099-01-01T00:00:00.000Z');
     db.close();
-    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 3, compatible: true });
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 4, compatible: true });
     const store = new SqliteBotStore(botId, path);
     expect(await store.getAttachmentStorage('old' as any)).toEqual({ public: publicPart, privatePath: '/tmp/old', expiresAt: '2099-01-01T00:00:00.000Z', status: 'available' });
     store.close();
-    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 3, supportedVersion: 3, compatible: true });
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 4, supportedVersion: 4, compatible: true });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -252,6 +253,50 @@ test('read-only store leaves old bot database bytes and schema unchanged', async
     expect(() => new SqliteBotStore(botId, join(dir, 'missing.sqlite'), { readonly: true })).toThrow();
     expect(existsSync(join(dir, 'missing.sqlite'))).toBe(false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('owner code is hashed, expires, limits attempts and atomically binds only the matching private sender', async () => {
+  const f = fixture();
+  try {
+    const expiry = new Date(Date.now() + 60_000).toISOString();
+    const issued = await f.store.createOwnerVerification(principalId, expiry);
+    expect(issued.code).toMatch(/^[A-F0-9]{12}$/);
+    const db = new Database(f.path, { readonly: true });
+    expect((db.query('SELECT code_hash FROM owner_verifications').get() as { code_hash: string }).code_hash).not.toBe(issued.code);
+    db.close();
+    expect(await f.store.consumeOwnerVerification(privateCode('bad', 'WRONG'))).toBe('blocked');
+    expect(await f.store.resolveActor({ gate: 'telegram', externalId: '999' })).toBeUndefined();
+    expect(await f.store.consumeOwnerVerification({ ...privateCode('group', issued.code), destination: { gate: 'telegram', externalId: '-100' } })).toBe('none');
+    expect(await f.store.consumeOwnerVerification(privateCode('good', issued.code, '888'))).toBe('matched');
+    expect(await f.store.ownerVerificationStatus(issued.code)).toEqual({ state: 'used', actorId: '888', principalId });
+    expect(await f.store.resolveActor({ gate: 'telegram', externalId: '888' })).toBe(principalId);
+    expect(await f.store.consumeOwnerVerification(privateCode('replay', issued.code, '999'))).toBe('none');
+    const second = await f.store.createOwnerVerification(principalId, expiry);
+    for (let n = 0; n < 5; n++) expect(await f.store.consumeOwnerVerification(privateCode(`guess-${n}`, '000000000000', '777'))).toBe('blocked');
+    expect(await f.store.consumeOwnerVerification(privateCode('limited', second.code, '777'))).toBe('blocked');
+    expect(await f.store.resolveActor({ gate: 'telegram', externalId: '777' })).toBeUndefined();
+    const third = await f.store.createOwnerVerification(principalId, expiry);
+    expect(await f.store.ownerVerificationStatus(second.code)).toEqual({ state: 'expired' });
+    const editable = new Database(f.path);
+    editable.query('UPDATE owner_verifications SET expires_at=? WHERE used_at IS NULL').run('2000-01-01T00:00:00.000Z');
+    editable.close();
+    expect(await f.store.ownerVerificationStatus(third.code)).toEqual({ state: 'expired' });
+  } finally { f.cleanup(); }
+});
+
+test('owner verification survives restart and competing store instances bind once', async () => {
+  const f = fixture();
+  try {
+    const { code } = await f.store.createOwnerVerification(principalId, new Date(Date.now() + 60_000).toISOString());
+    const second = new SqliteBotStore(botId, f.path);
+    try {
+      const results = await Promise.all([f.store.consumeOwnerVerification(privateCode('race-a', code, '777')), second.consumeOwnerVerification(privateCode('race-b', code, '888'))]);
+      expect(results.filter(result => result === 'matched')).toHaveLength(1);
+      const status = await second.ownerVerificationStatus(code);
+      expect(status.state).toBe('used');
+      expect(await second.resolveActor({ gate: 'telegram', externalId: status.actorId! })).toBe(principalId);
+    } finally { second.close(); }
+  } finally { f.cleanup(); }
 });
 
 test('unknown private pairing notice is durable, deduplicated and ordered', async () => {

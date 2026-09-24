@@ -90,6 +90,8 @@ export class BotRuntime {
     if (this.stopped) return;
     const principalId = await this.deps.store.resolveActor(event.actor);
     if (!principalId) {
+      const verification = await this.deps.store.consumeOwnerVerification(event);
+      if (verification !== 'none') return;
       if (event.kind === 'message' && event.destination.externalId === event.actor.externalId && this.deps.manifest.gate.access.mode === 'pairing') {
         const created = await this.deps.store.createPairingNotice(event, new Date(this.now().getTime() + 10 * 60_000).toISOString());
         if (created.kind === 'ok') void this.flushDeliveries();

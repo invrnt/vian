@@ -116,4 +116,18 @@ CREATE TABLE pairing_notices (
   UNIQUE(gate,external_event_id)
 );
 CREATE INDEX pairing_notices_destination_order ON pairing_notices(destination_key,delivery_sequence);
+`, `
+CREATE TABLE owner_verifications (
+  code_hash TEXT PRIMARY KEY, principal_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+  used_at TEXT, actor_id TEXT
+);
+CREATE INDEX owner_verifications_active ON owner_verifications(expires_at, used_at);
+CREATE TABLE owner_verification_attempts (
+  actor_id TEXT PRIMARY KEY, window_start TEXT NOT NULL, count INTEGER NOT NULL
+);
+CREATE TABLE owner_verification_events (
+  external_event_id TEXT PRIMARY KEY, received_at TEXT NOT NULL
+);
+CREATE INDEX owner_verification_events_time ON owner_verification_events(received_at);
 `] as const;

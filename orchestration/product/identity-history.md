@@ -16,6 +16,10 @@ Source: PRD §§21, 49.1, 49.6.
 
 Default deny. Unknown private senders get a one-time short-lived pairing code, never model access or implicit principals. CLI lists pending/access, approves --as and revokes. Allowlisting uses numeric IDs, never usernames; groups require approved users/chats and mention/reply policy.
 
+The owner can instead run `vian access verify <bot> [--as <principal>] [--minutes N]`. The CLI shows one random 12-character code and waits until its deadline (10 minutes by default; 1–30 allowed). The invited user sends that code as the entire text of a private Telegram message. Vian consumes it and binds that message's numeric sender to the selected canonical principal in one transaction; the CLI reports the sender and principal. Without `--as`, Vian generates a new opaque canonical principal UUID. Only one owner-issued code remains active per bot; issuing another expires the previous one. Codes are stored as SHA-256 digests, not logged or given to the model. Unknown messages while an owner code is pending receive no bot-issued pairing notice. Each sender has five attempts per ten minutes and each bot accepts at most 100 verification attempts per ten minutes. Verification messages themselves never enter the model inbox. The older requester-initiated pending/approve flow remains available when no owner code is pending.
+
+Assumption: a 12-character uppercase hexadecimal code (48 random bits), a 10-minute default, 30-minute maximum, and per-sender/global attempt caps offer a simple manual entry flow with bounded guessing. Validate usability with real Telegram users before release.
+
 Acceptance: Unauthorized input produces zero provider/tool calls; expiring/single-use approval survives restart; revocation blocks subsequent events/callbacks. Test wrong sender/chat, reused code and username impersonation.
 
 ## V012: Durable inbox and queues
