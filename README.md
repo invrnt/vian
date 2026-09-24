@@ -17,14 +17,14 @@ You can give other apps their own bots, each with separate instructions, tools a
 The Linux installer detects Bun. If Bun is installed, it downloads a roughly 1 MB Vian script; otherwise it downloads a standalone x64 or arm64 executable of roughly 80 MB. It verifies the release checksum and installs `vian` in `~/.local/bin` (or the directory given by `--dir`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.3
+curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.4
 ```
 
 Bun must remain installed for the small script to run, including as a user service. Use `--runtime standalone` to choose a self-contained executable even when Bun is installed, or `--runtime bun` to require Bun explicitly.
 
 The preview release has not passed every live release gate; see the [release report](orchestration/release-report.md). A stable release can be installed without `--version`.
 
-To update the installed command, run `vian update`. It selects the newest published release with an asset for your Linux runtime and architecture, including preview releases. The update keeps your current Bun script or standalone format by default, verifies `SHA256SUMS`, checks that the downloaded command runs, and replaces the command at its installed location. Use `vian update --version v0.1.0-preview.3` for a specific tag, or `--runtime bun|standalone` to change formats. Bun must be installed to choose `bun`. A running daemon keeps using its old code until you restart it with `vian service restart` or restart the terminal daemon.
+To update the installed command, run `vian update`. It selects the newest published release with an asset for your Linux runtime and architecture, including preview releases. The update keeps your current Bun script or standalone format by default, verifies `SHA256SUMS`, checks that the downloaded command runs, and replaces the command at its installed location. Use `vian update --version v0.1.0-preview.4` for a specific tag, or `--runtime bun|standalone` to change formats. Bun must be installed to choose `bun`. A running daemon keeps using its old code until you restart it with `vian service restart` or restart the terminal daemon.
 
 ## First bot
 
