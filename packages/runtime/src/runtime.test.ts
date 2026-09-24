@@ -385,6 +385,29 @@ test('unknown private sender receives one durable pairing notice without model a
   } finally { await f.close(); }
 });
 
+test('owner verification consumes a private code without model access or legacy code disclosure', async () => {
+  let modelCalls = 0;
+  const scripted = new MockLanguageModelV4({ doStream: async () => { modelCalls++; return stream(textParts('hello')); } });
+  const f = await fixture({ model: scripted });
+  const sender = { gate: 'telegram' as const, externalId: '99' };
+  try {
+    await f.runtime.start();
+    const { code } = await f.store.createOwnerVerification('invited-user' as PrincipalId, new Date(Date.now() + 60_000).toISOString());
+    await f.gate.emit({ ...f.event('wrong', 'wrong'), actor: sender, destination: sender });
+    expect(await f.store.resolveActor(sender)).toBeUndefined();
+    expect(await f.store.listDeliveries(sender)).toEqual([]);
+    await f.gate.emit({ ...f.event('verify', code), actor: sender, destination: sender });
+    expect(await f.store.resolveActor(sender)).toBe('invited-user' as PrincipalId);
+    expect(modelCalls).toBe(0);
+    expect(await f.store.listDeliveries(sender)).toEqual([]);
+    const audit = [];
+    for await (const entry of f.store.history({})) audit.push(entry);
+    expect(JSON.stringify(audit)).not.toContain(code);
+    await f.gate.emit({ ...f.event('message', 'hello'), actor: sender, destination: sender });
+    await eventually(async () => modelCalls === 1);
+  } finally { await f.close(); }
+});
+
 test('five follow-ups steer in accepted order at one settled boundary', async () => {
   let releaseTool!: () => void;
   const held = new Promise<void>(resolve => { releaseTool = resolve; });

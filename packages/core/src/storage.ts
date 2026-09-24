@@ -41,6 +41,12 @@ export interface BotStore extends ActionPort {
   /** For an unaccepted unknown private message only: dedupe by Gate event ID, create/reuse one unexpired actor code, and persist plain system notice plus outbox atomically. No principal, session or model access. */
   createPairingNotice(event: InboundEvent, expiresAt: string): Promise<StorageOutcome<void>>;
   approvePairing(code: string, principalId: PrincipalId): Promise<StorageOutcome<void>>;
+  /** Create an owner-visible, one-use Telegram DM verification. The code is never persisted in plaintext. */
+  createOwnerVerification(principalId: PrincipalId, expiresAt: string): Promise<{ code: string; expiresAt: string }>;
+  /** Atomically consume a matching private Telegram message, bind its numeric sender, and suppress legacy pairing while an owner code is active. */
+  consumeOwnerVerification(event: InboundEvent): Promise<'matched' | 'blocked' | 'none'>;
+  /** Owner-only lookup for the waiting CLI. */
+  ownerVerificationStatus(code: string): Promise<{ state: 'pending' | 'used' | 'expired' | 'missing'; actorId?: string; principalId?: PrincipalId }>;
   revokeBinding(actor: ExternalActor): Promise<void>;
   acceptInbound(event: InboundEvent): Promise<StorageOutcome<InboxRecord>>;
   /** After authorization recheck, consume only queued/claimed input and append inbound_rejected audit in one transaction; lease release remains caller-owned. */

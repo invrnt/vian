@@ -8,6 +8,8 @@ export class AccessService {
   pending() { return this.store.listPendingPairings(); }
   list() { return this.store.listActorBindings(); }
   approve(code: string, principalId: PrincipalId): Promise<StorageOutcome<void>> { return this.store.approvePairing(code, principalId); }
+  createVerification(principalId: PrincipalId, expiresAt: string) { return this.store.createOwnerVerification(principalId, expiresAt); }
+  verificationStatus(code: string) { return this.store.ownerVerificationStatus(code); }
   revoke(actor: ExternalActor): Promise<void> { return this.store.revokeBinding(actor); }
 
   async bindTransport(actor: ExternalActor, destination: ExternalDestination, principalId: PrincipalId, conversationId: ConversationId): Promise<SessionId> {
