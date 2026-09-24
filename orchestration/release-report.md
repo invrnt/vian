@@ -1,5 +1,13 @@
 # Vian V1 release evidence — 2026-09-23
 
+## Follow-up for preview.5 candidate — 2026-09-24
+
+The current candidate is based on source revision `02a1781461aa1cd10278a985b7d96c73cbd588ef`, after preview.4. It adds background daemon activation with duplicate-start reporting, daemon stop/restart controls, foreground operation for systemd, and `vian service uninstall`.
+
+At that revision, GitHub Actions Verify run [36043658755](https://github.com/invrnt/vian/actions/runs/36043658755) completed successfully. It ran schema consistency, the full check suite, build and foundation smoke. Local `bun run check` passed 122 tests and 753 assertions; `bun run build` passed. A compiled CLI smoke in temporary data paths verified daemon start, already-running response, status, restart and stop. The service unit and uninstall command were tested with the mocked service runner.
+
+**V1 release readiness remains BLOCKED.** This preview does not claim stable readiness. Live Telegram, Gateway and Gemini journeys, a fresh Linux systemd user-service lifecycle, and the 25 connected-bot idle-resource measurement still lack evidence, as recorded below. Publishing a preview makes these changes available for testing and does not waive those gates.
+
 ## Decision and scope
 
 **BLOCKED: V1 release readiness is not established.** The combined source at `3942f52` passes the available local build and deterministic checks. Live Telegram, Gateway and Gemini journeys, a fresh Linux user-service install, and 25 connected Telegram bots remain unverified because their required external accounts or environment were unavailable. These are required gates, not waived features. No deployment, service installation, push or protected merge was performed.

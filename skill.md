@@ -7,7 +7,7 @@ Vian runs registered Telegram bots in one local daemon. Each bot has a `vian.jso
 On Linux, install the pinned preview release with the checksum-verifying [installer](README.md#install):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.4
+curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh -s -- --version v0.1.0-preview.5
 vian --help
 ```
 
