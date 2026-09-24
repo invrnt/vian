@@ -93,15 +93,56 @@ test('service unit and runner use a disposable user directory', async () => {
   const runner = async (command: string, args: string[]) => { calls.push([command, ...args]); return { code: 0, stdout: '', stderr: '' }; };
   try {
     expect(renderUserUnit('/usr/local/bin/vian')).toContain('Restart=on-failure');
-    expect(renderUserUnit('/opt/bun/bin/bun', '/home/user/.local/bin/vian')).toContain('ExecStart=/opt/bun/bin/bun /home/user/.local/bin/vian daemon');
+    expect(renderUserUnit('/opt/bun/bin/bun', '/home/user/.local/bin/vian')).toContain('ExecStart=/opt/bun/bin/bun /home/user/.local/bin/vian daemon --foreground');
     expect(await serviceCommand('install', context, runner, { unitDir: root, executable: '/usr/local/bin/vian' })).toBe(0);
-    expect(await readFile(join(root, 'vian.service'), 'utf8')).toContain('ExecStart=/usr/local/bin/vian daemon');
+    expect(await readFile(join(root, 'vian.service'), 'utf8')).toContain('ExecStart=/usr/local/bin/vian daemon --foreground');
     expect(calls).toEqual([['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', 'enable', 'vian.service']]);
     expect((await stat(join(root, 'vian.service'))).mode & 0o777).toBe(0o600);
     expect(await serviceCommand('start', context, runner, { unitDir: root })).toBe(0);
     expect(calls.at(-1)).toEqual(['systemctl', '--user', 'start', 'vian.service']);
+    expect(await serviceCommand('uninstall', context, runner, { unitDir: root })).toBe(0);
+    expect(calls.slice(-2)).toEqual([['systemctl', '--user', 'disable', '--now', 'vian.service'], ['systemctl', '--user', 'daemon-reload']]);
+    await expect(stat(join(root, 'vian.service'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await serviceCommand('uninstall', context, runner, { unitDir: root })).toBe(0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('daemon command starts in the background and supports repeated start, restart and stop', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vian-daemon-cli-'));
+  const env = { ...process.env, XDG_DATA_HOME: root, VIAN_HOME: join(root, 'credentials-home') };
+  const command = async (...args: string[]) => {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../packages/cli/src/main.ts'), ...args], { env, stdout: 'pipe', stderr: 'pipe' });
+    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    return { stdout, stderr, code };
+  };
+  try {
+    expect((await command('daemon')).stdout).toContain('started successfully');
+    expect((await command('daemon')).stdout).toContain('already running');
+    expect((await command('status')).code).toBe(0);
+    expect((await command('daemon', 'restart')).stdout).toContain('restarted successfully');
+    expect((await command('daemon', 'stop')).stdout).toContain('stopped');
+    expect((await command('daemon', 'stop')).stdout).toContain('not running');
+  } finally {
+    await command('daemon', 'stop');
+    await rm(root, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test('daemon command reports startup failure without claiming success', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vian-daemon-failure-'));
+  const dataFile = join(root, 'not-a-directory');
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(dataFile, 'occupied');
+  try {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../packages/cli/src/main.ts'), 'daemon'], {
+      env: { ...process.env, XDG_DATA_HOME: dataFile, VIAN_HOME: join(root, 'credentials-home') }, stdout: 'pipe', stderr: 'pipe',
+    });
+    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(code).toBe(1);
+    expect(stdout).not.toContain('started successfully');
+    expect(stderr).toContain('ENOTDIR');
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 20_000);
 
 test('runtime diagnostics rotate without entering conversation history', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vian-logs-'));

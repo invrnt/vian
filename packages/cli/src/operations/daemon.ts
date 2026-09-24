@@ -39,6 +39,8 @@ export class VianDaemon {
   private stopping = false;
   private maintenance?: ReturnType<typeof setInterval>;
   private daemonLock?: () => void;
+  private resolveStopped!: () => void;
+  readonly stopped = new Promise<void>(resolve => { this.resolveStopped = resolve; });
   private readonly runs = new RunPermit(16);
   constructor(private readonly dependencies: { assemble?: typeof assembleBot; validate?: typeof validateBot } = {}) {}
 
@@ -151,5 +153,6 @@ export class VianDaemon {
     this.registry?.close();
     const path = socketPath(); if (existsSync(path)) rmSync(path);
     this.daemonLock?.();
+    this.resolveStopped();
   }
 }

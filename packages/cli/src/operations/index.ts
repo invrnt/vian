@@ -1,20 +1,19 @@
 import { existsSync, readFileSync, watch } from 'node:fs';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
 import type { CommandContext, PrincipalId } from '@vian/core';
 import { SqliteBotStore } from '@vian/storage';
 import { AccessService } from '../../../runtime/src/index.ts';
 import { findBot, has, option, positional, socketPath, withRegistry } from '../local/common.ts';
 import { requestControl } from './control.ts';
 import { logPath } from './logs.ts';
-import { VianDaemon } from './daemon.ts';
+import { daemonCommand } from './daemon-command.ts';
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function output(context: CommandContext, value: unknown, json: boolean): void { context.stdout(json ? `${JSON.stringify({ ok: true, data: value })}\n` : `${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`); }
 async function service(args: string[], context: CommandContext): Promise<number> {
   if (process.platform !== 'linux') throw new Error('Systemd user service is supported on Linux only');
   const verb = args[0];
-  if (!['install', 'start', 'stop', 'restart', 'status'].includes(verb ?? '')) throw new Error('Usage: vian service install|start|stop|restart|status');
+  if (!['install', 'uninstall', 'start', 'stop', 'restart', 'status'].includes(verb ?? '')) throw new Error('Usage: vian service install|uninstall|start|stop|restart|status');
   const { serviceCommand } = await import('./service.ts');
   return serviceCommand(verb!, context);
 }
@@ -73,15 +72,7 @@ async function showLogs(args: string[], context: CommandContext): Promise<void> 
 export async function runOperations(args: string[], context: CommandContext): Promise<number> {
   const [command, ...rest] = args;
   try {
-    if (command === 'daemon') {
-      const daemon = new VianDaemon();
-      await daemon.start();
-      await new Promise<void>(resolve => {
-        const stop = () => { process.off('SIGINT', stop); process.off('SIGTERM', stop); void daemon.stop().then(resolve); };
-        process.on('SIGINT', stop); process.on('SIGTERM', stop);
-      });
-      return 0;
-    }
+    if (command === 'daemon') return daemonCommand(rest, context);
     if (command === 'service') return service(rest, context);
     if (command === 'telegram') { const { connectTelegram } = await import('./telegram.ts'); await connectTelegram(rest, context); return 0; }
     if (command === 'test') { const { localTest } = await import('./test.ts'); return localTest(rest, context); }

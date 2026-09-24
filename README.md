@@ -24,7 +24,9 @@ Bun must remain installed for the small script to run, including as a user servi
 
 The preview release has not passed every live release gate; see the [release report](orchestration/release-report.md). A stable release can be installed without `--version`.
 
-To update the installed command, run `vian update`. It selects the newest published release with an asset for your Linux runtime and architecture, including preview releases. The update keeps your current Bun script or standalone format by default, verifies `SHA256SUMS`, checks that the downloaded command runs, and replaces the command at its installed location. Use `vian update --version v0.1.0-preview.4` for a specific tag, or `--runtime bun|standalone` to change formats. Bun must be installed to choose `bun`. A running daemon keeps using its old code until you restart it with `vian service restart` or restart the terminal daemon.
+To update the installed command, run `vian update`. It selects the newest published release with an asset for your Linux runtime and architecture, including preview releases. The update keeps your current Bun script or standalone format by default, verifies `SHA256SUMS`, checks that the downloaded command runs, and replaces the command at its installed location. Use `vian update --version v0.1.0-preview.4` for a specific tag, or `--runtime bun|standalone` to change formats. Bun must be installed to choose `bun`. A running daemon keeps using its old code until you restart it with `vian daemon restart` or `vian service restart` if using the service.
+
+To remove Vian, run `vian daemon stop`, then `vian service uninstall` if you installed the user service. Remove the installed command afterward. For the default install, use `rm -- "$HOME/.local/bin/vian"`. This leaves registered bots, their directories and credentials intact. See [operations](docs/operations.md) for data locations.
 
 ## First bot
 
@@ -49,7 +51,7 @@ vian daemon
 
 With the daemon running, the owner runs `vian telegram connect my-bot` in an interactive terminal. It validates and saves that bot's token without echoing it, then reloads the bot. Check with `vian doctor my-bot --online` and approve the first private user's pairing code with `vian access approve`.
 
-Run `daemon` in a terminal, or use `vian service install` and `vian service start` for a systemd user service. `test` invokes the real instructions, tools and provider without connecting to Telegram; it uses a separate temporary conversation by default.
+`vian daemon` starts in the background and reports when it is ready or already running. Use `vian daemon stop|restart` to control it. For startup after login, use `vian service install` and `vian service start` for a systemd user service. `test` invokes the real instructions, tools and provider without connecting to Telegram; it uses a separate temporary conversation by default.
 
 To build from source instead, install Bun 1.4.2, then run `bun install --frozen-lockfile && bun run check && bun run build`. The binary is `./dist/vian`.
 

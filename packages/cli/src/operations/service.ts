@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -11,7 +11,7 @@ export function renderUserUnit(executable: string, script?: string): string {
     return /\s|"/.test(escaped) ? `"${escaped}"` : escaped;
   };
   const command = [quote(executable), ...(script ? [quote(script)] : [])].join(' ');
-  return `[Unit]\nDescription=Vian bot daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=${command} daemon\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Vian bot daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=${command} daemon --foreground\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 export async function serviceCommand(verb: string, context: CommandContext, run = async (command: string, args: string[]) => {
@@ -24,6 +24,21 @@ export async function serviceCommand(verb: string, context: CommandContext, run 
 }, options: { unitDir?: string; executable?: string } = {}): Promise<number> {
   const unitDir = options.unitDir ?? join(homedir(), '.config/systemd/user');
   const unitPath = join(unitDir, 'vian.service');
+  if (verb === 'uninstall') {
+    try { await access(unitPath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      context.stdout('Vian user service is not installed.\n');
+      return 0;
+    }
+    const disabled = await run('systemctl', ['--user', 'disable', '--now', 'vian.service']);
+    if (disabled.code) throw new Error(disabled.stderr || 'systemctl disable failed');
+    await rm(unitPath);
+    const reload = await run('systemctl', ['--user', 'daemon-reload']);
+    if (reload.code) throw new Error(reload.stderr || 'systemctl daemon-reload failed');
+    context.stdout(`Removed ${unitPath}\n`);
+    return 0;
+  }
   if (verb === 'install') {
     if (!options.executable && /\/packages\/cli\/src\/main\.ts$/.test(Bun.main)) throw new Error('Build the standalone Vian executable before installing the service');
     await mkdir(unitDir, { recursive: true, mode: 0o700 });

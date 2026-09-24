@@ -8,6 +8,8 @@ Source: PRD §§7–8, 11, 38.
 
 One shared daemon multiplexes enabled bots, with same-user local Unix control socket, bounded runs, start/stop/restart and enabled/autostart state. No model/provider process per bot.
 
+Assumption: `vian daemon` starts in the background and reports successful or repeated activation. `vian daemon stop|restart` controls that process; `--foreground` is reserved for terminal debugging and the systemd unit. This keeps interactive startup short while retaining systemd's process supervision. Validate startup, duplicate invocation, shutdown and restart with isolated global paths.
+
 Acceptance: Start multiple bots, stop/restart one, toggle enable/disable and restart daemon; verify socket permissions and reject invalid control requests. A second daemon cannot independently own the same bot stores or polling stream.
 
 ## V038: Fault isolation and restart
