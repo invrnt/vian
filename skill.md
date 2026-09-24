@@ -13,6 +13,8 @@ vian --help
 
 The installer uses Bun when available; that installation still needs Bun to run. Pass `--runtime standalone` to the installer for a self-contained executable. Ensure `~/.local/bin` is on `PATH`.
 
+Run `vian update` from an installed Vian command to get the newest published release, including previews. It keeps the current Bun or standalone format. Use `vian update --version <tag>` to pin a release or `vian update --runtime bun|standalone` to change formats; Bun is required for the `bun` format. Restart a running daemon after updating, with `vian service restart` for the user service or by restarting `vian daemon` in its terminal.
+
 For a new bot beside an existing app, choose a provider and a model ID available to that account:
 
 ```sh
@@ -43,7 +45,7 @@ vian test <bot> 'Use the hello tool to greet Ada'
 vian daemon
 ```
 
-Run `doctor` and `test` before exposing the bot on Telegram. `test` calls the real provider and tools in a temporary conversation; tools can make real changes. `doctor --online` probes Telegram and configured MCP servers without a model call. With the daemon running, connect Telegram, then run `vian doctor <bot> --online` and `vian status`. The first private user receives a pairing code; the owner reviews `vian access pending <bot>` and approves it with `vian access approve <bot> <code> --as <principal>`.
+Run `doctor` and `test` before exposing the bot on Telegram. `test` calls the real provider and tools in a temporary conversation; tools can make real changes. `doctor --online` probes Telegram and configured MCP servers without a model call. With the daemon running, connect Telegram, then run `vian doctor <bot> --online` and `vian status`. To invite a user, run `vian access verify <bot> [--as <principal>] [--minutes N]` and ask them to send the displayed one-use code in a private message to the bot. The command waits, binds that Telegram sender, and reports their numeric ID. It expires after 10 minutes by default; `N` can be 1–30. Without `--as`, Vian creates and displays a principal ID. Requester-initiated pairing also works through `vian access pending <bot>` and `vian access approve <bot> <code> --as <principal>`.
 
 For background operation on Linux, use `vian service install` followed by `vian service start`. Use `vian restart <bot>` after changing its instructions, tools, manifest, or local environment. Check `vian logs <bot> --follow` for diagnostics and `vian history <bot> --jsonl` for the audit. `vian enable <bot>` and `vian disable <bot>` control startup. See [operations](docs/operations.md) and [Telegram Gate](docs/gates.md).
 
@@ -52,3 +54,4 @@ For background operation on Linux, use `vian service install` followed by `vian 
 - **Read-only app helper:** expose an app function such as `getBalance` as one native tool, with a narrow schema and an application-level authorization check. Give `VIAN.md` the bot's purpose, then run `doctor` and a `test` request that calls the tool.
 - **Write action:** expose only the intended operation, validate its arguments, and use `context.idempotencyKey` when calling an external system. Test with disposable app data because `vian test` runs the tool. Use `audit: 'metadata-only'` for sensitive tool input or output.
 - **Move a bot to another machine:** download its directory, run `vian init <directory>`, configure the provider profile or local `env:` key on that machine, and connect that bot's Telegram token. Check `doctor`, `test`, and `status` there. Never copy a global provider profile into the repo.
+- **Invite a friend:** run `vian access verify <bot> --as friend`, share its code with that person, and leave the command running while they send the code privately to the bot. Note the Telegram ID reported on success.
