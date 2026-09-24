@@ -4,7 +4,11 @@ import type { AuditEvent, BotId, CommandContext, HistoryFilter, PrincipalId, Ses
 import { SqliteBotStore, inspectBotSchema } from '@vian/storage';
 import { absolute, findBot, has, manifestAt, option, positional, registryPath, withRegistry } from './common.ts';
 
-function row(values: string[]): string { return values.join('\t') + '\n'; }
+function tableLines(headers: string[], rows: string[][]): string[] {
+  const widths = headers.map((header, column) => Math.max(Bun.stringWidth(header), ...rows.map(row => Bun.stringWidth(row[column]!))));
+  const format = (cells: string[]) => cells.map((cell, column) => column === cells.length - 1 ? cell : cell + ' '.repeat(widths[column]! - Bun.stringWidth(cell) + 2)).join('').trimEnd();
+  return [format(headers), ...rows.map(format)];
+}
 function botDb(root: string): string { return join(root, '.vian', 'state.sqlite'); }
 function openBot(record: { id: BotId; path: string }): SqliteBotStore {
   const path = botDb(record.path);
@@ -33,7 +37,14 @@ export async function list(args: string[], context: CommandContext): Promise<voi
     return { name: record.alias, id: record.id, status: missing ? 'missing' : record.enabled ? 'stopped' : 'disabled', gate, model, sessions, path: record.path, enabled: record.enabled };
   }));
   if (has(args, '--json')) context.stdout(JSON.stringify({ ok: true, data: results }) + '\n');
-  else { context.stdout(row(['NAME', 'STATUS', 'GATE', 'MODEL', 'SESSIONS', 'PATH'])); for (const item of results) context.stdout(row([item.name, item.status, item.gate, item.model, String(item.sessions), item.path])); }
+  else {
+    if (!results.length) { context.stdout('No bots registered.\n'); return; }
+    const headers = ['NAME', 'STATUS', 'GATE', 'MODEL', 'SESSIONS'];
+    const rows = results.map(item => [item.name, item.status, item.gate, item.model, String(item.sessions)]);
+    const lines = tableLines(headers, rows);
+    context.stdout(lines[0]! + '\n');
+    for (let index = 0; index < results.length; index++) context.stdout(`${lines[index + 1]}\n  Path  ${results[index]!.path}\n`);
+  }
 }
 export async function inspect(args: string[], context: CommandContext): Promise<void> {
   const selector = positional(args.slice(1))[0];
@@ -54,7 +65,8 @@ export async function sessions(args: string[], context: CommandContext): Promise
   try {
     const data = await store.listSessions();
     if (has(args, '--json')) context.stdout(JSON.stringify({ ok: true, data }) + '\n');
-    else { context.stdout(row(['SESSION', 'PRINCIPAL', 'LAST ACTIVE', 'MESSAGES', 'STATE'])); for (const item of data) context.stdout(row([item.id, item.initiatorId, item.lastActiveAt, String(item.messageCount), item.state])); }
+    else if (!data.length) context.stdout('No sessions.\n');
+    else context.stdout(tableLines(['SESSION', 'PRINCIPAL', 'LAST ACTIVE', 'MESSAGES', 'STATE'], data.map(item => [item.id, item.initiatorId, item.lastActiveAt, String(item.messageCount), item.state])).join('\n') + '\n');
   } finally { store.close(); }
 }
 function textFromEvent(event: AuditEvent): string {

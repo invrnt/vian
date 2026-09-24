@@ -1,5 +1,13 @@
 # Vian V1 release evidence — 2026-09-23
 
+## Preview.6 candidate — 2026-09-24
+
+Human-readable `list` and `sessions` now use measured column widths. `list` places each full path below its bot row so long paths no longer shift the status fields. Empty results have a short message. JSON output is unchanged. A local CLI fixture checks long and wide-character names, column alignment, paths and JSON.
+
+Validation: `bun test packages/cli/src/local/local.test.ts`, `bun run typecheck`, `bun run build` and `bun run smoke:foundation` passed. `bun run check` initially failed one daemon command test because this host already runs `vian.service`; the same command with a disposable `XDG_RUNTIME_DIR` passed 123 tests and 775 assertions. This does not add live provider or Telegram evidence, so V1 readiness remains blocked as described below.
+
+Dependency evidence: `package.json`, `bun.lock` and `.tool-versions` pin Bun 1.4.2 and TypeScript 7.0.2. The official [Bun `stringWidth` reference](https://bun.com/reference/bun/stringWidth), retrieved 2026-09-24, says the API measures terminal columns including wide characters. A local Bun 1.4.2 probe confirmed that `Bun.stringWidth` exists, and the CLI fixture passed on that runtime. No dependency was added.
+
 ## Follow-up for preview.5 candidate — 2026-09-24
 
 The code candidate is source revision `b7a257564441b9f418912d340bd92a7892bd1d17`, after preview.4. It adds background daemon activation with duplicate-start reporting, daemon stop/restart controls, foreground operation for systemd, and `vian service uninstall`. The installer and usage instructions now select the newest published release with a compatible Linux asset, including previews, without a version embedded in Markdown install commands.

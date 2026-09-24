@@ -71,10 +71,31 @@ test('Gateway init selects the shared credential profile by default', async () =
 test('offline list with no registry leaves global state untouched', async () => {
   const f = fixture();
   try {
+    expect((await f.invoke('list')).out).toBe('No bots registered.\n');
     const result = await f.invoke('list', '--json');
     expect(result.code).toBe(0);
     expect(JSON.parse(result.out).data).toEqual([]);
     expect(existsSync(join(f.data, 'vian/registry.sqlite'))).toBe(false);
+  } finally { f.cleanup(); }
+});
+
+test('list aligns fields after long and wide bot names while keeping paths separate', async () => {
+  const f = fixture();
+  try {
+    expect((await f.invoke('init', f.bot, '--name', 'presentation-maker', '--model', 'gpt-6-luna')).code).toBe(0);
+    const second = join(f.root, 'second');
+    expect((await f.invoke('init', second, '--name', '猫-bot', '--model', 'gpt-6-luna')).code).toBe(0);
+    const result = await f.invoke('list');
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain('\t');
+    const [header, first, firstPath, wide, widePath] = result.out.trimEnd().split('\n');
+    for (const [label, value] of [['STATUS', 'stopped'], ['GATE', 'telegram'], ['MODEL', 'gpt-6-luna'], ['SESSIONS', '0']]) {
+      expect(Bun.stringWidth(first!.slice(0, first!.indexOf(value)))).toBe(Bun.stringWidth(header!.slice(0, header!.indexOf(label))));
+      expect(Bun.stringWidth(wide!.slice(0, wide!.indexOf(value)))).toBe(Bun.stringWidth(header!.slice(0, header!.indexOf(label))));
+    }
+    expect(firstPath).toBe(`  Path  ${f.bot}`);
+    expect(widePath).toBe(`  Path  ${second}`);
+    expect(JSON.parse((await f.invoke('list', '--json')).out).data).toHaveLength(2);
   } finally { f.cleanup(); }
 });
 
@@ -157,7 +178,15 @@ test('session listing and registry count use bot-local state while offline', asy
     } finally { store.close(); }
     const sessions = await f.invoke('sessions', 'bot', '--json');
     expect(sessions.code).toBe(0);
-    expect(JSON.parse(sessions.out).data).toHaveLength(1);
+    const session = JSON.parse(sessions.out).data[0];
+    expect(session).toBeDefined();
+    const humanSessions = await f.invoke('sessions', 'bot');
+    expect(humanSessions.code).toBe(0);
+    expect(humanSessions.out).not.toContain('\t');
+    const [sessionHeader, sessionRow] = humanSessions.out.trimEnd().split('\n');
+    for (const [label, value] of [['PRINCIPAL', session.initiatorId], ['LAST ACTIVE', session.lastActiveAt], ['MESSAGES', String(session.messageCount)], ['STATE', session.state]]) {
+      expect(sessionRow!.slice(sessionHeader!.indexOf(label)).startsWith(value)).toBe(true);
+    }
     const listed = await f.invoke('list', '--json');
     expect(JSON.parse(listed.out).data[0].sessions).toBe(1);
   } finally { f.cleanup(); }

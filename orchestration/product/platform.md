@@ -78,6 +78,8 @@ Acceptance: Record compiled-binary measurements with hardware/runtime, cold/warm
 
 Assumption: unknown manifest fields fail with a field-specific validation error. The source permits warning or error. JSON output covers list, inspect, sessions, status, doctor, access list/pending and auth list/status; history uses source-defined JSONL and logs support JSON.
 
+Assumption: Human-readable `list` keeps the compact status fields in aligned columns and prints each full bot path beneath its row. This keeps paths readable without widening every column; `--json` retains the complete record for scripts. Terminal-width review and a long-name fixture validate the layout.
+
 The apparent session-reset timing conflict in §9.6, which mentions operations later, is resolved by the explicit V1 /new requirements in §§45–46; CLI reset remains future. Performance budgets are required engineering/release measurements, even though §§37 and 55 forbid advertising them as guarantees before measurement. V1 readiness reports failures honestly rather than waiving them.
 
 Optional items omitted: file watching, MCP HTTP/wildcard convenience, rich messages, backup CLI, future migration CLI, extra transports and post-V1 candidates. Required safe database backups and future-schema refusal remain in scope. Security/audit design implements the source-permitted full/metadata-only modes; separate redacted/none controls are future extensions.
