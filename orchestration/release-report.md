@@ -2,9 +2,9 @@
 
 ## Follow-up for preview.5 candidate — 2026-09-24
 
-The current candidate is based on source revision `02a1781461aa1cd10278a985b7d96c73cbd588ef`, after preview.4. It adds background daemon activation with duplicate-start reporting, daemon stop/restart controls, foreground operation for systemd, and `vian service uninstall`.
+The code candidate is source revision `b7a257564441b9f418912d340bd92a7892bd1d17`, after preview.4. It adds background daemon activation with duplicate-start reporting, daemon stop/restart controls, foreground operation for systemd, and `vian service uninstall`. The installer and usage instructions now select the newest published release with a compatible Linux asset, including previews, without a version embedded in Markdown install commands.
 
-At that revision, GitHub Actions Verify run [36043658755](https://github.com/invrnt/vian/actions/runs/36043658755) completed successfully. It ran schema consistency, the full check suite, build and foundation smoke. Local `bun run check` passed 122 tests and 753 assertions; `bun run build` passed. A compiled CLI smoke in temporary data paths verified daemon start, already-running response, status, restart and stop. The service unit and uninstall command were tested with the mocked service runner.
+At that revision, GitHub Actions Verify run [36045340126](https://github.com/invrnt/vian/actions/runs/36045340126) completed successfully. It ran schema consistency, the full check suite, build and foundation smoke. Local `bun run check` passed 122 tests and 753 assertions; `bun run build` passed. A compiled CLI smoke in temporary data paths verified daemon start, already-running response, status, restart and stop. The service unit and uninstall command were tested with the mocked service runner. The default installer was also run in a temporary directory; it selected the newest available release at that time, verified its checksum, installed the Bun script and passed `vian --help`.
 
 **V1 release readiness remains BLOCKED.** This preview does not claim stable readiness. Live Telegram, Gateway and Gemini journeys, a fresh Linux systemd user-service lifecycle, and the 25 connected-bot idle-resource measurement still lack evidence, as recorded below. Publishing a preview makes these changes available for testing and does not waive those gates.
 
