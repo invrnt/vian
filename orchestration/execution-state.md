@@ -12,7 +12,7 @@
 | O | integrated | codex/vian-operations `/home/jc/dev/personal/vian-operations` | 1ac8410 | 105 combined tests; build/smoke; §67; live gpt-5.5 tool/steering/stop/shared bots; V009 medians | 6e2bb35 | Telegram, installed service, 25 live bots unverified |
 | H | integrated; release blocked | codex/vian-hardening `/home/jc/dev/personal/vian-hardening` | 4fca0e7 | frozen install, schema/build/smoke, 106 tests and 648 assertions; T08 report | 92e1152 | live Telegram, Gateway, Gemini, fresh Linux install, 25 connected bots unavailable |
 
-| linux_local | running | codex/linux-local `/home/jc/dev/freelancer/SlideGenerator-linux-local` | — | — | — | — |
+| linux_local | integrated locally | codex/linux-local `/home/jc/dev/freelancer/SlideGenerator-linux-local` | efe4c86 | Bun tests host and Debian container; web builds; Go tests; live host YouTube MP4/PPTX | 0763109 | Debian live YouTube and PowerPoint playback unverified |
 | vian_update | integrated | codex/vian-update `/home/jc/dev/personal/vian-update` | 5322aec | 116 tests, build, compiled help, live Bun-script update at 5322aec | 3484d2f | standalone/service update unverified |
 | vian_skill | integrated | codex/vian-skill `/home/jc/dev/personal/vian-skill` | 6fae579 | frozen install, 14 CLI tests at 938fa41; syntax review and diff check at 6fae579 | 312bc93 | — |
 | telegram_verify | integrated | codex/vian-pairing `/home/jc/dev/personal/vian-pairing` | 00b43d4 | 116 branch tests; combined 120 tests, build, smoke at 163dcd9 | 163dcd9 | live Telegram unverified |
