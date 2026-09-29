@@ -12,7 +12,7 @@ const api = `https://api.github.com/repos/${repo}/releases`;
 const help = 'Usage: vian update [--version TAG] [--runtime bun|standalone]\nUpdates the installed command to the newest published release, including previews.\n';
 type Asset = { name: string; browser_download_url: string; state: string };
 type Release = { tag_name: string; draft: boolean; published_at: string | null; assets: Asset[] };
-type Options = { fetch?: typeof fetch; installedPath?: string; currentRuntime?: 'bun' | 'standalone'; bunPath?: string; platform?: string; arch?: string; musl?: boolean };
+type Options = { fetch?: typeof fetch; installedPath?: string; sourcePath?: string; currentRuntime?: 'bun' | 'standalone'; bunPath?: string; platform?: string; arch?: string; musl?: boolean };
 
 function assetName(runtime: 'bun' | 'standalone', arch: string, musl: boolean): string {
   if (runtime === 'bun') return 'vian-bun.js';
@@ -110,7 +110,22 @@ export async function updateCommand(args: string[], context: CommandContext, opt
   }
   try {
     if ((options.platform ?? process.platform) !== 'linux') throw new Error('Prebuilt updates currently support Linux only');
-    const source = Bun.main;
+    const source = options.sourcePath ?? Bun.main;
+    if (!options.installedPath && source.endsWith('/packages/cli/src/main.ts')) {
+      const marker = '/.vian-app/';
+      const markerAt = source.lastIndexOf(marker);
+      if (markerAt < 0) throw new Error('Run update from an installed Vian command, not a source checkout');
+      const appRoot = join(source.slice(0, markerAt), '.vian-app');
+      const installDir = dirname(appRoot);
+      const installer = join(source.slice(0, source.lastIndexOf('/packages/cli/src/main.ts')), 'install.sh');
+      if (!(await stat(installer)).isFile()) throw new Error('Installed Vian source has no installer');
+      const installerArgs = [installer, '--dir', installDir, '--runtime', runtime ?? 'bun', ...(version ? ['--version', version] : [])];
+      const result = spawnSync('sh', installerArgs, { encoding: 'utf8', timeout: 600_000, maxBuffer: 1024 * 1024 });
+      if (result.stdout) context.stdout(result.stdout);
+      if (result.stderr) context.stderr(result.stderr);
+      if (result.error || result.status !== 0) throw new Error(result.error?.message ?? `installer exited with status ${result.status}`);
+      return 0;
+    }
     if (!options.installedPath && source.endsWith('.ts')) throw new Error('Run update from an installed Vian command, not a source checkout');
     const compiled = source.startsWith('/$bunfs/');
     const installed = await realpath(options.installedPath ?? (compiled ? process.execPath : source));

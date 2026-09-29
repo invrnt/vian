@@ -14,19 +14,19 @@ You can give other apps their own bots, each with separate instructions, tools a
 
 ## Install
 
-The Linux installer detects Bun. If Bun is installed, it downloads a roughly 1 MB Vian script; otherwise it downloads a standalone x64 or arm64 executable of roughly 80 MB. It verifies the release checksum and installs `vian` in `~/.local/bin` (or the directory given by `--dir`):
+The Linux installer uses Bun. It reuses an existing Bun installation (including `~/.bun/bin/bun` when it is absent from `PATH`), or installs Bun 1.4.2 with Bun's official installer. It downloads a small, checksum-verified Vian source archive and runs `bun install --frozen-lockfile --production` for its packages. Bun caches packages for future updates. The `vian` command is a small wrapper in `~/.local/bin` (or the directory given by `--dir`):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/invrnt/vian/main/install.sh | sh
 ```
 
-Bun must remain installed for the small script to run, including as a user service. The installer selects the newest published release with an asset for this Linux runtime and architecture, including previews. It needs Python 3 to find that release. Use `--runtime standalone` to choose a self-contained executable even when Bun is installed, or `--runtime bun` to require Bun explicitly. Use `--version TAG` to pin a release.
+Bun must remain installed for Vian to run, including as a user service. The installer selects the newest published release with a source asset, including previews. It needs Python 3 to find that release. Use `--runtime standalone` only if you explicitly want a self-contained x64 or arm64 executable of roughly 88 MB. Use `--version TAG` to pin a release.
 
 The preview has not passed every live release gate; see the [release report](orchestration/release-report.md). Keep using an explicit preview tag until a stable release is published.
 
-To update the installed command, run `vian update`. It selects the newest published release with an asset for your Linux runtime and architecture, including preview releases. The update keeps your current Bun script or standalone format by default, verifies `SHA256SUMS`, checks that the downloaded command runs, and replaces the command at its installed location. Use `vian update --version TAG` to pin a specific release, or `--runtime bun|standalone` to change formats. Bun must be installed to choose `bun`. A running daemon keeps using its old code until you restart it with `vian daemon restart` or `vian service restart` if using the service.
+To update a Bun installation, run `vian update`. It selects the newest published source release, verifies `SHA256SUMS`, runs a frozen Bun dependency install, checks the new command and switches the active source tree. Use `vian update --version TAG` to pin a release. `--runtime standalone` opts into the large binary. A running daemon keeps using its old code until you restart it with `vian daemon restart` or `vian service restart` if using the service.
 
-To remove Vian, run `vian daemon stop`, then `vian service uninstall` if you installed the user service. Remove the installed command afterward. For the default install, use `rm -- "$HOME/.local/bin/vian"`. This leaves registered bots, their directories and credentials intact. See [operations](docs/operations.md) for data locations.
+To remove Vian, run `vian daemon stop`, then `vian service uninstall` if you installed the user service. Remove `~/.local/bin/vian` and `~/.local/bin/.vian-app` afterward. This leaves registered bots, their directories and credentials intact. See [operations](docs/operations.md) for data locations.
 
 ## First bot
 

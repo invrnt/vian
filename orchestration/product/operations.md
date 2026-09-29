@@ -52,7 +52,7 @@ Ship reproducible standalone build, MIT license and adapted-code notices; concis
 
 Acceptance: Clean install from artifact on fresh Linux, execute documented setup and example flows, audit dependency licenses and notices; source/lock/build agree and no secrets ship.
 
-Assumption: `vian update` selects the newest published release with the required asset and checksum, including prereleases, because previews are currently the only available releases. It preserves the installed runtime format by default; explicit tag and runtime flags allow a deliberate choice. Validate selection and replacement with offline release fixtures and confirm against a published release before claiming live update compatibility.
+Assumption: `vian update` selects the newest published release with the required asset and checksum, including prereleases, because previews are currently the only available releases. The default Debian installation uses a verified source archive and Bun's frozen production dependency install; `--runtime standalone` remains an explicit option for a self-contained executable. This avoids downloading the large embedded runtime on normal updates and lets Bun reuse its package cache. Validate selection, dependency install and replacement with offline release fixtures and a published release before claiming live update compatibility.
 
 ## V043: Release verification
 

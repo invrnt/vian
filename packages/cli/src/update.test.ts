@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from './main.ts';
@@ -79,4 +79,20 @@ test('bad checksum and failed smoke check preserve installed command', async () 
       expect(await readdir(root)).toEqual(['vian']);
     } finally { await rm(root, { recursive: true, force: true }); }
   }
+});
+
+test('installed Bun source delegates update to its installer with the same command directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vian-source-update-'));
+  const app = join(root, 'bin', '.vian-app', 'releases', 'v-old');
+  const source = join(app, 'packages', 'cli', 'src', 'main.ts');
+  const output = join(root, 'arguments');
+  try {
+    await mkdir(join(app, 'packages', 'cli', 'src'), { recursive: true });
+    await writeFile(source, '');
+    await writeFile(join(app, 'install.sh'), `#!/bin/sh\nprintf '%s\\n' "$@" > '${output}'\n`);
+    const stderr: string[] = [];
+    expect(await updateCommand(['--version', 'v0.2.0-preview.1'], { cwd: root, stdout: () => {}, stderr: value => stderr.push(value) }, { sourcePath: source })).toBe(0);
+    expect((await readFile(output, 'utf8')).trim().split('\n')).toEqual(['--dir', join(root, 'bin'), '--runtime', 'bun', '--version', 'v0.2.0-preview.1']);
+    expect(stderr).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

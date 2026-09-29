@@ -40,9 +40,12 @@ export async function serviceCommand(verb: string, context: CommandContext, run 
     return 0;
   }
   if (verb === 'install') {
-    if (!options.executable && /\/packages\/cli\/src\/main\.ts$/.test(Bun.main)) throw new Error('Build the standalone Vian executable before installing the service');
+    if (!options.executable && /\/packages\/cli\/src\/main\.ts$/.test(Bun.main) && !Bun.main.includes('/.vian-app/')) throw new Error('Install Vian before installing the service');
     await mkdir(unitDir, { recursive: true, mode: 0o700 });
-    const script = !options.executable && Bun.main.endsWith('.js') ? Bun.main : undefined;
+    const installedSourceAt = Bun.main.lastIndexOf('/.vian-app/');
+    const script = options.executable ? undefined : installedSourceAt >= 0
+      ? `${Bun.main.slice(0, installedSourceAt)}/.vian-app/current/packages/cli/src/main.ts`
+      : /\.(?:js|ts)$/.test(Bun.main) ? Bun.main : undefined;
     await writeFile(unitPath, renderUserUnit(options.executable ?? process.execPath, script), { mode: 0o600 });
     const reload = await run('systemctl', ['--user', 'daemon-reload']);
     if (reload.code) throw new Error(reload.stderr || 'systemctl daemon-reload failed');

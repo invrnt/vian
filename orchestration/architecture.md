@@ -59,7 +59,9 @@ Linux uses a same-user Unix socket. Isolate platform path/control/service handli
 
 ## Open technical decisions
 
-Assumption: release metadata and checksum requests keep a 30-second deadline; an artifact download gets five minutes because Linux standalone assets are about 88 MB and may exceed 30 seconds on a slower link. The updater still verifies SHA-256 and executes the candidate before atomic replacement. The 2026-09-29 Debian timeout report and a real preview update validate this bound.
+Assumption: Debian's default release artifact is `vian-source.tar.gz`, containing the Bun workspace source, lockfile and installer. The installer detects Bun in PATH or its standard user location, uses Bun's official pinned installer if absent, verifies the source archive, and runs `bun install --frozen-lockfile --production`. A small wrapper points to a versioned source tree; switching its `current` symlink activates an update. Bun's package cache avoids downloading unchanged packages. The standalone artifact remains an explicit opt-in. This choice is validated by an isolated local source install and update tests; a published-release check remains required.
+
+Release metadata and checksum requests keep a 30-second deadline; standalone artifact downloads get five minutes. The standalone updater still verifies SHA-256 and executes the candidate before atomic replacement. The 2026-09-29 Debian timeout report and preview update validate that bound for the legacy format.
 
 Foundation must establish exact package versions, build/test scripts, schema generation and control framing through minimal compatibility probes. contracts.md defines the required seam decisions, including C09 for the user-approved safe steering default. The original PRD queue default is superseded by product/identity-history.md V044. Do not publish or depend on the example `vian.dev` schema URL without an established hosting/release contract; generate a local schema first.
 

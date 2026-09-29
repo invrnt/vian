@@ -66,6 +66,8 @@ Resource bottlenecks are now dependencies and shared ownership rather than agent
 
 ## Ownership transfers and extensions
 
+Post-release Bun distribution assignment (2026-09-29, source `5590eae`): the user requested removal of the large standalone install and a Bun-managed code/dependency install and update path. All former implementation assignments are complete. The current maintainer exclusively owns `install.sh`, `packages/cli/src/update.ts`, `packages/cli/src/operations/service.ts`, their tests, `.github/workflows/release.yml`, `README.md`, `docs/operations.md`, and the corresponding product, architecture, testing and handoff documentation for this change. Root and package manifests and `bun.lock` remain unchanged. This records the transfer before edits.
+
 Post-release updater correction (2026-09-29, source `c6d8d29`): the user's `vian update` timeout report transfers `packages/cli/src/update.ts` and the corresponding operations handoff/documentation to the current maintainer. The release agent's prior assignment is complete. This scope covers the download timeout needed for the published Debian artifact; no other implementation path is transferred.
 
 Post-release extension (2026-09-28, source `7014bf4` plus the uncommitted Luna/vision work): the user's Telegram menu correction transfers `packages/gate-telegram/src/` and its colocated tests to the current maintainer for command publication. The maintainer also owns the corresponding Telegram product note and handoff. No former agent is active on those paths. The existing `packages/core/src/storage.ts` transfer remains untouched.
