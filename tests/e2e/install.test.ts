@@ -44,7 +44,7 @@ test('installer puts Vian source and frozen Bun dependencies beside a small comm
   const asset = 'vian-source.tar.gz';
   try {
     await mkdir(release);
-    const archive = Bun.spawn(['tar', '--exclude=node_modules', '-czf', join(release, asset), 'package.json', 'bun.lock', 'install.sh', 'packages'], { cwd: resolve('.') });
+    const archive = Bun.spawn(['tar', '--exclude=node_modules', '-czf', join(release, asset), 'package.json', 'bun.lock', 'install.sh', 'LICENSE', 'packages'], { cwd: resolve('.') });
     expect(await archive.exited).toBe(0);
     const archiveBytes = await readFile(join(release, asset));
     await writeFile(join(release, 'SHA256SUMS'), `${createHash('sha256').update(archiveBytes).digest('hex')}  ${asset}\n`);
@@ -58,6 +58,7 @@ test('installer puts Vian source and frozen Bun dependencies beside a small comm
     expect(stderr).not.toContain('error');
     expect((await readFile(join(bin, 'vian'), 'utf8')).length).toBeLessThan(500);
     expect(await readFile(join(bin, '.vian-app', 'current', 'bun.lock'), 'utf8')).toContain('lockfileVersion');
+    expect(await readFile(join(bin, '.vian-app', 'current', 'LICENSE'), 'utf8')).toContain('MIT License');
     const command = Bun.spawn([join(bin, 'vian'), '--help'], { stdout: 'pipe', stderr: 'pipe' });
     expect(await command.exited).toBe(0);
     const first = await readlink(join(bin, '.vian-app', 'current'));
