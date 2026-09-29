@@ -9,7 +9,7 @@ import type { BotId } from '@vian/core';
 import { chatgptSubscriptionAdapter } from './index.ts';
 import { activeSubscriptionTokens, refreshAuthorization } from './oauth.ts';
 
-const modelId = process.env.VIAN_LIVE_MODEL ?? 'gpt-5.5';
+const modelId = process.env.VIAN_LIVE_MODEL ?? 'gpt-6-luna';
 const root = await mkdtemp(join(tmpdir(), 'vian-provider-live-'));
 try {
   await Promise.all([mkdir(join(root, 'bot-a')), mkdir(join(root, 'bot-b'))]);

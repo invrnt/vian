@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { generateText, jsonSchema, stepCountIs, streamText, tool, type ModelMessage } from 'ai';
-import type { ActionId, AttachmentId, AttachmentPort, AuditEvent, BotId, BotManifest, BotStore, CanonicalMessage, ConversationId, ExternalDestination, GateAdapter, InboxRecord, InboundEvent, MessageId, NativeToolSet, OutboxPart, PrincipalId, ProviderAdapter, RunId, SessionId, ToolCallId, ToolContext } from '@vian/core';
+import type { ActionId, AttachmentId, AttachmentPort, AuditEvent, BotId, BotManifest, BotStore, CanonicalMessage, ConversationId, ExternalDestination, GateAdapter, InboxRecord, InboundEvent, MessageId, MessagePart, NativeToolSet, OutboxPart, PrincipalId, ProviderAdapter, RunId, SessionId, ToolCallId, ToolContext } from '@vian/core';
 export { AccessService } from './access.ts';
 
 export interface RuntimeDependencies {
@@ -26,6 +26,8 @@ const asId = <T extends string>(value: string) => value as T;
 const safeError = (error: unknown): string => error instanceof Error && error.name === 'AbortError' ? 'Generation stopped.' : 'The request could not be completed.';
 const destinationKey = (destination: ExternalDestination): string => JSON.stringify([destination.gate, destination.externalId, destination.threadId ?? '']);
 const textOf = (message: CanonicalMessage): string => message.parts.map(part => part.type === 'text' ? part.text : part.type === 'interaction' ? `${part.label}: ${JSON.stringify(part.value)}` : `[attachment: ${part.name ?? part.mimeType ?? 'file'}]`).join('\n');
+const imageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const maxModelImageBytes = 20 * 1024 * 1024;
 
 /** One bot's canonical coordinator. All network actions follow durable store transitions. */
 export class BotRuntime {
@@ -229,7 +231,7 @@ export class BotRuntime {
     const modelTools = { ...this.deps.tools, ...gateTools, ...attachmentTools };
     const previous = await this.contextMessages(sessionId, input.messageId!, model);
     const summaryContext = previous.filter(message => message.role === 'system').map(message => message.content).join('\n');
-    const messages: ModelMessage[] = [...previous.filter(message => message.role !== 'system'), { role: 'user', content: textOf({ id: input.messageId!, botId: this.deps.botId, conversationId: ctx.conversationId, sessionId, principalId, runId, role: 'user', parts: input.event.parts ?? [], createdAt: input.acceptedAt }) }];
+    const messages: ModelMessage[] = [...previous.filter(message => message.role !== 'system'), await this.userMessage(input.event.parts ?? [])];
     const toolOutput: unknown[] = [];
     const converted = Object.fromEntries(Object.entries(modelTools).map(([name, native]) => [name, tool({
       description: native.description,
@@ -277,7 +279,7 @@ export class BotRuntime {
         if (stepNumber === 0 || this.deps.manifest.runtime.sameSessionPolicy !== 'steer') return {};
         const batch = await this.deps.store.claimSteeringBatch(runId, sessionId, 16);
         if (!batch.messages.length) return {};
-        return { messages: [...current, ...batch.messages.map(message => ({ role: 'user' as const, content: textOf(message) }))] };
+        return { messages: [...current, ...await Promise.all(batch.messages.map(message => this.userMessage(message.parts)))] };
       },
     });
     try {
@@ -311,6 +313,40 @@ export class BotRuntime {
     }
   }
 
+  private async userMessage(parts: MessagePart[], includeImages = true): Promise<ModelMessage> {
+    const content: Array<{ type: 'text'; text: string } | { type: 'file'; data: Uint8Array; mediaType: string }> = [];
+    for (const part of parts) {
+      if (part.type === 'text') content.push({ type: 'text', text: part.text });
+      else if (part.type === 'interaction') content.push({ type: 'text', text: `${part.label}: ${JSON.stringify(part.value)}` });
+      else {
+        const label = part.name ?? part.mimeType ?? 'file';
+        content.push({ type: 'text', text: `[attachment: ${label}; id: ${part.attachmentId}]` });
+        if (!includeImages || !part.mimeType || !imageTypes.has(part.mimeType.toLowerCase())) continue;
+        const [metadata] = await this.deps.attachments.list(this.deps.botId, [part.attachmentId]);
+        if (!metadata || metadata.size > maxModelImageBytes) {
+          content.push({ type: 'text', text: '[image unavailable]' });
+          continue;
+        }
+        try {
+          const reader = await this.deps.attachments.open(this.deps.botId, part.attachmentId);
+          try {
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            for await (const chunk of reader.stream) {
+              size += chunk.byteLength;
+              if (size > maxModelImageBytes) throw new Error('Image too large');
+              chunks.push(chunk);
+            }
+            content.push({ type: 'file', data: Buffer.concat(chunks, size), mediaType: metadata.mimeType });
+          } finally { await reader.release(); }
+        } catch {
+          content.push({ type: 'text', text: '[image unavailable]' });
+        }
+      }
+    }
+    return { role: 'user', content: content.some(part => part.type === 'file') ? content : content.map(part => part.type === 'text' ? part.text : '').join('\n') };
+  }
+
   private async contextMessages(sessionId: SessionId, currentMessageId: MessageId, model: Parameters<typeof generateText>[0]['model']): Promise<ModelMessage[]> {
     const summary = await this.deps.store.readSummary(sessionId);
     const records: AuditEvent[] = [];
@@ -326,13 +362,13 @@ export class BotRuntime {
     }
     const max = this.deps.manifest.context.maxRecentMessages;
     const accepted = new Map<MessageId, InboundEvent>();
-    const transcript: { sequence: number; message: ModelMessage }[] = [];
+    const transcript: { sequence: number; message: ModelMessage; parts?: MessagePart[] }[] = [];
     for (const event of records) {
       if (event.kind === 'inbound_message' && event.payload.messageId && event.payload.event) accepted.set(event.payload.messageId as MessageId, event.payload.event as InboundEvent);
       if (event.kind === 'run_started' || event.kind === 'inbound_consumed') {
         const id = event.payload.messageId as MessageId | undefined;
         const inbound = id && accepted.get(id);
-        if (inbound && id !== currentMessageId) transcript.push({ sequence: event.sequence, message: { role: 'user', content: inbound.parts?.map(part => part.type === 'text' ? part.text : part.type === 'interaction' ? `${part.label}: ${JSON.stringify(part.value)}` : '[attachment]').join('\n') ?? '' } });
+        if (inbound && id !== currentMessageId) transcript.push({ sequence: event.sequence, message: { role: 'user', content: inbound.parts?.map(part => part.type === 'text' ? part.text : part.type === 'interaction' ? `${part.label}: ${JSON.stringify(part.value)}` : `[attachment: ${part.name ?? part.mimeType ?? 'file'}]`).join('\n') ?? '' }, parts: inbound.parts ?? [] });
       }
       if (event.kind === 'assistant_message') {
         const message = event.payload.message as CanonicalMessage | undefined;
@@ -345,11 +381,18 @@ export class BotRuntime {
         const result = await generateText({ model, system: 'Summarize the earlier conversation faithfully and concisely. Do not include hidden reasoning or credentials.', messages: older.map(item => item.message), timeout: { totalMs: 15_000 } });
         if (result.text.trim()) {
           await this.deps.store.appendSummary(sessionId, [summary?.text, result.text.trim()].filter(Boolean).join('\n'), older.at(-1)!.sequence);
-          return [{ role: 'system', content: `Earlier conversation summary: ${[summary?.text, result.text.trim()].filter(Boolean).join('\n')}` }, ...transcript.slice(-max).map(item => item.message)];
+          return [{ role: 'system', content: `Earlier conversation summary: ${[summary?.text, result.text.trim()].filter(Boolean).join('\n')}` }, ...await this.recentMessages(transcript.slice(-max))];
         }
       } catch { /* Recent tail remains usable when summarization fails. */ }
     }
-    return [...(summary ? [{ role: 'system' as const, content: `Earlier conversation summary: ${summary.text}` }] : []), ...transcript.slice(-max).map(item => item.message)];
+    return [...(summary ? [{ role: 'system' as const, content: `Earlier conversation summary: ${summary.text}` }] : []), ...await this.recentMessages(transcript.slice(-max))];
+  }
+
+  private async recentMessages(items: { message: ModelMessage; parts?: MessagePart[] }[]): Promise<ModelMessage[]> {
+    const visualStart = Math.max(0, items.length - 4);
+    const messages: ModelMessage[] = [];
+    for (const [index, item] of items.entries()) messages.push(item.parts ? await this.userMessage(item.parts, index >= visualStart) : item.message);
+    return messages;
   }
 
   async flushDeliveries(): Promise<void> {

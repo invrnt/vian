@@ -42,6 +42,8 @@ Use Gate-neutral ID-based delivery and listing. Normalize incoming media to cano
 
 Acceptance: Round trip fake and Telegram photo/document with caption and generated report; send_attachment accepts ID, never path. Unsupported model media retains metadata; over-limit/download failure is audited without partial usable file.
 
+Assumption: Supported inbound images (`image/jpeg`, `image/png`, `image/webp`, `image/gif`) are sent as native model input with their text. The latest four prior transcript items may retain image bytes for follow-up questions; older items keep attachment metadata in text. This bounds repeated image input and falls back to explicit unavailable text after expiry. The runtime caps each model image at 20 MiB, matching the Telegram inbound limit. Offline runtime and subscription transport fixtures validate bytes and follow-up context; live visual understanding remains to be checked.
+
 ## V025: Retention and cleanup
 
 Source: PRD §§17.5, 48, 51, 56.
@@ -49,4 +51,3 @@ Source: PRD §§17.5, 48, 51, 56.
 Delete expired bytes through lightweight shared infrequent maintenance; retain metadata with expired/deleted status and unavailable path. Keep history indefinitely and logs bounded.
 
 Acceptance: Advance fake clock through TTL and active delivery: no deleted file remains usable, metadata/history survive, cleanup failures are logged safely and retried without busy polling.
-

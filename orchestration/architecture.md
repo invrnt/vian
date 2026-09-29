@@ -49,6 +49,8 @@ The subscription adapter coordinates refresh through the shared credential store
 
 ## Boundaries and reuse
 
+Inbound image bytes are read through the bot-scoped AttachmentPort when building model messages, released after reading, and never persisted in canonical audit payloads or global paths. The runtime uses AI SDK 7 `file` message parts for supported images; the subscription adapter converts these to `input_image` data URLs. Recent context can reopen retained attachments, while unsupported or expired media is represented by metadata only.
+
 Use AI SDK's tool/stream loop, bun:sqlite and grammY rather than duplicate frameworks. A small direct Telegram helper is permitted only for verified methods absent from the pinned grammY API. Tool execution stays trusted and in-process; an internal executor boundary enables later isolation without implementing it now. MCP child processes are explicitly configured servers, not a process per bot/provider architecture.
 
 Compilation must retain the ability to import user tool files and their local dependencies from arbitrary bot roots. Prove this early with a compiled binary in a temporary non-empty project. An unsupported compiled dynamic import path is a foundation blocker, not a reason to replace the tool contract silently.

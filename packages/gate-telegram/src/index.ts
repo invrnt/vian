@@ -88,6 +88,16 @@ export class TelegramGate implements GateAdapter {
     await this.bot.init();
     this.policy.botId = this.bot.botInfo.id;
     this.policy.botUsername = this.bot.botInfo.username;
+    const scope = { type: 'all_private_chats' as const };
+    const privateCommands = await this.bot.api.getMyCommands({ scope });
+    const commands = privateCommands.length ? privateCommands : await this.bot.api.getMyCommands({ scope: { type: 'default' } });
+    if (!commands.some(item => item.command === 'new')) {
+      await this.bot.api.setMyCommands([...commands, { command: 'new', description: 'Nueva conversación / New conversation' }], { scope });
+    }
+    const spanishCommands = await this.bot.api.getMyCommands({ scope, language_code: 'es' });
+    if (spanishCommands.length && !spanishCommands.some(item => item.command === 'new')) {
+      await this.bot.api.setMyCommands([...spanishCommands, { command: 'new', description: 'Nueva conversación' }], { scope, language_code: 'es' });
+    }
     this.started = true;
     this.pollAbort = new AbortController();
     this.polling = this.pollLoop();

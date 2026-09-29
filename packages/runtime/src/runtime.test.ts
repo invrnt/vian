@@ -20,7 +20,7 @@ const model = () => new MockLanguageModelV4({ doStream: async () => ({ stream: n
   controller.close();
 } }) }) });
 
-async function fixture(options: { model?: MockLanguageModelV4; tools?: import('@vian/core').NativeToolSet; sameSessionPolicy?: 'steer' | 'queue'; groups?: boolean } = {}) {
+async function fixture(options: { model?: MockLanguageModelV4; tools?: import('@vian/core').NativeToolSet; attachments?: AttachmentPort; sameSessionPolicy?: 'steer' | 'queue'; groups?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'vian-runtime-'));
   await writeFile(join(root, 'VIAN.md'), 'Follow the user request.');
   const botId = randomUUID() as BotId;
@@ -35,7 +35,7 @@ async function fixture(options: { model?: MockLanguageModelV4; tools?: import('@
   const provider: ProviderAdapter = { id: 'fake', async resolveModel() { return options.model ?? model(); } };
   const manifest = parseManifest({ schemaVersion: 1, id: botId, name: 'Fixture', model: { provider: 'google', id: 'fake' }, gate: { type: 'telegram', credential: 'env:FAKE', access: { groups: options.groups ?? false } }, runtime: { sameSessionPolicy: options.sameSessionPolicy } }, root);
   const attachments = { async register() { throw new Error('unused'); }, async ingest() { throw new Error('unused'); }, async open() { throw new Error('unused'); }, async list() { return []; }, async expire() { return 0; } } as AttachmentPort;
-  const runtime = new BotRuntime({ botId, botRoot: root, manifest, store, gate, provider, attachments, tools: options.tools });
+  const runtime = new BotRuntime({ botId, botRoot: root, manifest, store, gate, provider, attachments: options.attachments ?? attachments, tools: options.tools });
   const event = (id: string, text: string): InboundEvent => ({ gate: 'telegram', externalEventId: id, actor, destination, receivedAt: new Date().toISOString(), kind: 'message', parts: [{ type: 'text', text }] });
   return { root, botId, principal, conversation, destination, actor, store, gate, runtime, event, async close() { await runtime.stop(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -67,6 +67,32 @@ test('durable canonical message is delivered once after duplicate inbound', asyn
     for await (const item of f.store.history({ limit: 100 })) kinds.push(item.kind);
     expect(kinds.filter(kind => kind === 'inbound_message')).toHaveLength(1);
     expect(kinds.filter(kind => ['inbound_message', 'run_started', 'model_step', 'assistant_message', 'delivery_queued', 'run_completed', 'delivery_sending', 'delivery_succeeded'].includes(kind))).toEqual(['inbound_message', 'run_started', 'model_step', 'assistant_message', 'delivery_queued', 'run_completed', 'delivery_sending', 'delivery_succeeded']);
+  } finally { await f.close(); }
+});
+
+test('image bytes reach the model with the caption and remain visible on the next turn', async () => {
+  const image = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/S1sAAAAASUVORK5CYII=', 'base64'));
+  let releases = 0;
+  const attachments = {
+    async list(_botId: BotId, ids: string[]) { return ids.map(id => ({ id, name: 'slide.png', mimeType: 'image/png', size: image.byteLength })); },
+    async open() { return { stream: new Blob([image]).stream(), async release() { releases++; } }; },
+  } as unknown as AttachmentPort;
+  const scripted = model();
+  const f = await fixture({ model: scripted, attachments });
+  try {
+    await f.runtime.start();
+    const first = f.event('image-1', 'Read the URLs in this screenshot');
+    first.parts!.push({ type: 'attachment', attachmentId: 'slide-1' as never, name: 'slide.png', mimeType: 'image/png' });
+    await f.gate.emit(first);
+    await eventually(async () => f.gate.deliveries.length === 1);
+    await f.gate.emit(f.event('image-2', 'What was in the screenshot?'));
+    await eventually(async () => f.gate.deliveries.length === 2);
+    for (const call of scripted.doStreamCalls) {
+      const visual = call.prompt.flatMap(message => message.role === 'user' ? message.content : []).find(part => part.type === 'file' && part.mediaType === 'image/png');
+      expect(visual).toBeDefined();
+      if (visual?.type === 'file' && visual.data.type === 'data') expect(Buffer.from(visual.data.data).equals(Buffer.from(image))).toBe(true);
+    }
+    expect(releases).toBe(2);
   } finally { await f.close(); }
 });
 

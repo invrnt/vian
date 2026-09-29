@@ -30,14 +30,16 @@ To remove Vian, run `vian daemon stop`, then `vian service uninstall` if you ins
 
 ## First bot
 
-Choose a provider and model available to your account:
+New bots use ChatGPT OAuth and `gpt-6-luna` by default:
 
 ```sh
-vian init ./my-bot --provider openai-chatgpt --model gpt-5.5
+vian init ./my-bot
 vian auth login openai-chatgpt
 ```
 
-`init` keeps existing files and creates `vian.json`, `VIAN.md`, `vian.tools.ts`, `.env` and `.vian/` when needed. Each bot selects a provider and model. ChatGPT OAuth and Google/Gateway API-key profiles are global; Telegram credentials belong to each bot. The model ID shown above was validated against a ChatGPT subscription on 2026-09-23; availability can change.
+`init` keeps existing files and creates `vian.json`, `VIAN.md`, `vian.tools.ts`, `.env` and `.vian/` when needed. Each bot selects a provider and model. ChatGPT OAuth and Google/Gateway API-key profiles are global; Telegram credentials belong to each bot. OpenAI documents `gpt-6-luna` for its API, including image input; Vian's ChatGPT subscription route still needs a live compatibility check for this model. Existing bots keep the provider and model already written in `vian.json`. To change one, edit its `model` fields and restart that bot.
+
+Telegram photos and supported image documents are passed to the model with their caption or nearby text. Images in recent conversation context remain available for follow-up questions while their bot-local attachment bytes are retained. Other file types remain available by attachment metadata and explicit tools.
 
 For a bot already present in a downloaded project, run `vian init <bot-directory>` to fill missing local files and register it in the user's global index. If it is already initialized, `vian register <bot-directory>` just registers its existing identity. Set that bot's Telegram token locally; provider profiles already stored on this device are shared.
 

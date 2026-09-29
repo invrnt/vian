@@ -47,6 +47,47 @@ describe('Telegram normalization', () => {
 });
 
 describe('renderer and delivery', () => {
+  test('publishes /new in the private chat menu without removing existing commands', async () => {
+    const { gate, calls } = fixture([
+      { ok: true, result: { id: 99, is_bot: true, first_name: 'Vian', username: 'VianBot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false } },
+      { ok: true, result: [] },
+      { ok: true, result: [{ command: 'help', description: 'Help' }] },
+      { ok: true, result: true },
+      { ok: true, result: [] },
+    ]);
+    (gate as unknown as { pollLoop: () => Promise<void> }).pollLoop = async () => {};
+    const ports = { botId, attachments: {}, actions: {}, resolveDestination: async () => destination } as unknown as GateRuntimePorts;
+    await gate.start(async () => {}, ports);
+    await gate.stop();
+    expect(calls.map(call => call.method)).toEqual(['getMe', 'getMyCommands', 'getMyCommands', 'setMyCommands', 'getMyCommands']);
+    expect(calls[1]?.body).toMatchObject({ scope: { type: 'all_private_chats' } });
+    expect(calls[3]?.body).toMatchObject({ scope: { type: 'all_private_chats' }, commands: [{ command: 'help', description: 'Help' }, { command: 'new', description: 'Nueva conversación / New conversation' }] });
+  });
+  test('leaves an existing /new menu entry untouched', async () => {
+    const { gate, calls } = fixture([
+      { ok: true, result: { id: 99, is_bot: true, first_name: 'Vian', username: 'VianBot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false } },
+      { ok: true, result: [{ command: 'new', description: 'Start fresh' }] },
+      { ok: true, result: [] },
+    ]);
+    (gate as unknown as { pollLoop: () => Promise<void> }).pollLoop = async () => {};
+    const ports = { botId, attachments: {}, actions: {}, resolveDestination: async () => destination } as unknown as GateRuntimePorts;
+    await gate.start(async () => {}, ports);
+    await gate.stop();
+    expect(calls.map(call => call.method)).toEqual(['getMe', 'getMyCommands', 'getMyCommands']);
+  });
+  test('adds /new to an existing Spanish private menu', async () => {
+    const { gate, calls } = fixture([
+      { ok: true, result: { id: 99, is_bot: true, first_name: 'Vian', username: 'VianBot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false } },
+      { ok: true, result: [{ command: 'new', description: 'Start fresh' }] },
+      { ok: true, result: [{ command: 'ayuda', description: 'Ayuda' }] },
+      { ok: true, result: true },
+    ]);
+    (gate as unknown as { pollLoop: () => Promise<void> }).pollLoop = async () => {};
+    const ports = { botId, attachments: {}, actions: {}, resolveDestination: async () => destination } as unknown as GateRuntimePorts;
+    await gate.start(async () => {}, ports);
+    await gate.stop();
+    expect(calls.at(-1)).toMatchObject({ method: 'setMyCommands', body: { scope: { type: 'all_private_chats' }, language_code: 'es', commands: [{ command: 'ayuda', description: 'Ayuda' }, { command: 'new', description: 'Nueva conversación' }] } });
+  });
   test('escapes reserved characters and preserves code and links', () => {
     expect(renderMarkdownV2('a_b. `x_y` [site](https://example.com/a)')).toBe('a\\_b\\. `x_y` [site](https://example.com/a)');
     const chunks = chunkMarkdown('🙂'.repeat(1200));
@@ -118,6 +159,7 @@ describe('renderer and delivery', () => {
     const update = { update_id: 41, message: { message_id: 7, date: 1, chat: { id: 123, type: 'private' }, from: { id: 123, is_bot: false, first_name: 'Ada' }, text: 'hello' } };
     const { gate, calls } = fixture([
       { ok: true, result: { id: 99, is_bot: true, first_name: 'Vian', username: 'VianBot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false } },
+      { ok: true, result: [] }, { ok: true, result: [] }, { ok: true, result: true }, { ok: true, result: [] },
       { ok: true, result: [update] }, { ok: true, result: [update] }, { ok: true, result: [] },
     ]);
     let seen = 0;

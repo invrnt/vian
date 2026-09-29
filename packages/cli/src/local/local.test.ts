@@ -37,7 +37,7 @@ test('init preserves unrelated bytes, env values and gitignore across reruns', a
     const manifest = readFileSync(join(f.bot, 'vian.json'));
     expect(env.toString()).toContain('TELEGRAM_BOT_TOKEN=keep-this');
     expect(env.toString()).not.toContain('GEMINI_API_KEY=');
-    expect(JSON.parse(manifest.toString()).model.credential).toBe('profile:google-default');
+    expect(JSON.parse(manifest.toString()).model.credential).toBe('oauth:openai-chatgpt:default');
     expect(readFileSync(join(f.bot, 'package.json'))).toEqual(packageBytes);
     expect(readFileSync(join(f.bot, 'VIAN.md'), 'utf8')).toBe('Custom rules\n');
     expect((await f.invoke(...args)).code).toBe(0);
@@ -65,6 +65,17 @@ test('Gateway init selects the shared credential profile by default', async () =
     const manifest = JSON.parse(readFileSync(join(f.bot, 'vian.json'), 'utf8'));
     expect(manifest.model.credential).toBe('profile:vercel-ai-gateway-default');
     expect(readFileSync(join(f.bot, '.env'), 'utf8')).toBe('TELEGRAM_BOT_TOKEN=\n');
+  } finally { f.cleanup(); }
+});
+
+test('noninteractive init defaults to GPT-6 Luna and keeps explicit provider requirements', async () => {
+  const f = fixture();
+  try {
+    expect((await f.invoke('init', f.bot, '--no-register')).code).toBe(0);
+    expect(JSON.parse(readFileSync(join(f.bot, 'vian.json'), 'utf8')).model).toEqual({ provider: 'openai-chatgpt', id: 'gpt-6-luna', credential: 'oauth:openai-chatgpt:default' });
+    const another = join(f.root, 'google-bot');
+    expect((await f.invoke('init', another, '--provider', 'google', '--no-register')).code).toBe(1);
+    expect((await f.invoke('init', another, '--provider', 'google', '--model', 'gemini-test', '--no-register')).code).toBe(0);
   } finally { f.cleanup(); }
 });
 
@@ -126,7 +137,7 @@ test('offline inspect exposes references and history/doctor errors remain script
     expect((await f.invoke('init', f.bot, '--model', 'test-model')).code).toBe(0);
     const inspected = await f.invoke('inspect', 'bot', '--json');
     expect(inspected.code).toBe(0);
-    expect(inspected.out).toContain('profile:google-default');
+    expect(inspected.out).toContain('oauth:openai-chatgpt:default');
     expect(inspected.out).not.toContain('secret-value');
     const history = await f.invoke('history', 'bot', '--jsonl');
     expect(history.code).toBe(1);

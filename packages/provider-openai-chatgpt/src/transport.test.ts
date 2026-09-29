@@ -44,6 +44,23 @@ test('Codex SSE sends dedicated backend protocol and streams text without reason
   expect(JSON.stringify(await result.steps)).not.toContain('private thoughts');
 });
 
+test('Codex transport sends image bytes with text as input_image', async () => {
+  const store = await fixture();
+  let posted: Record<string, unknown> = {};
+  const fetcher = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    posted = JSON.parse(String(init?.body));
+    return response([{ type: 'response.completed', response: { status: 'completed' } }]);
+  }) as typeof fetch;
+  const selected = await chatgptSubscriptionAdapter(store, fetcher).resolveModel({ ...input, modelId: 'gpt-6-luna' });
+  if (typeof selected === 'string' || !('doStream' in selected)) throw new Error('Expected model object');
+  const model = selected as LanguageModelV4;
+  const bytes = Uint8Array.from([137, 80, 78, 71]);
+  const result = await model.doStream({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'Read this screenshot' }, { type: 'file', data: { type: 'data', data: bytes }, mediaType: 'image/png' }] }] });
+  await Array.fromAsync(result.stream);
+  expect(posted.model).toBe('gpt-6-luna');
+  expect(posted.input).toMatchObject([{ role: 'user', content: [{ type: 'input_text', text: 'Read this screenshot' }, { type: 'input_image', image_url: `data:image/png;base64,${Buffer.from(bytes).toString('base64')}` }] }]);
+});
+
 test('Codex function call is normalized for the Vian AI SDK tool loop', async () => {
   const store = await fixture();
   let posted: Record<string, unknown> = {};

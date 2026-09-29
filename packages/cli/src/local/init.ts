@@ -36,9 +36,9 @@ function envName(ref: string | undefined): string | undefined { return ref?.star
 function validateChoice(value: string, choices: readonly string[], flag: string): string { if (!choices.includes(value)) throw new Error(`${flag} must be ${choices.join(', ')}`); return value; }
 function defaultManifest(root: string, args: string[], forcedName?: string): BotManifest {
   const name = forcedName ?? option(args, '--name') ?? basename(root);
-  const provider = validateChoice(option(args, '--provider') ?? 'google', ['google', 'vercel-ai-gateway', 'openai-chatgpt'], '--provider') as BotManifest['model']['provider'];
+  const provider = validateChoice(option(args, '--provider') ?? 'openai-chatgpt', ['google', 'vercel-ai-gateway', 'openai-chatgpt'], '--provider') as BotManifest['model']['provider'];
   const credential = option(args, '--credential') ?? (provider === 'google' ? 'profile:google-default' : provider === 'vercel-ai-gateway' ? 'profile:vercel-ai-gateway-default' : 'oauth:openai-chatgpt:default');
-  const model = option(args, '--model');
+  const model = option(args, '--model') ?? (provider === 'openai-chatgpt' ? 'gpt-6-luna' : undefined);
   if (!model) throw new Error('Specify --model with a model ID verified for your provider');
   const raw = { schemaVersion: 1, id: randomUUID(), name, instructions: option(args, '--instructions') ?? './VIAN.md', tools: option(args, '--tools') ?? './vian.tools.ts', model: { provider, id: model, credential }, gate: { type: 'telegram', credential: option(args, '--telegram-credential') ?? 'env:TELEGRAM_BOT_TOKEN', access: { mode: 'pairing', groups: false, administratorPrincipalIds: [] } }, runtime: { sameSessionPolicy: 'steer' } };
   return parseManifest(raw, join(root, 'vian.json'));
@@ -116,22 +116,23 @@ async function notifyLoad(botId: string, context: CommandContext): Promise<void>
 export function initArgs(command: string, args: string[]): { root: string; name?: string } {
   const values = positional(args.slice(1));
   if (command === 'create') {
-    if (values.length < 2) throw new Error('Usage: vian create <name> <path> --model <id>');
+    if (values.length < 2) throw new Error('Usage: vian create <name> <path> [--provider <name> --model <id>]');
     return { name: values[0], root: values[1]! };
   }
   return { root: values[0] ?? '.' };
 }
 export async function wizardArgs(root: string, args: string[], forcedName?: string): Promise<string[]> {
   if (existsSync(join(root, 'vian.json')) || option(args, '--model')) return args;
-  if (!process.stdin.isTTY) throw new Error('Specify --model <provider-model-id> for non-interactive init');
+  if (!process.stdin.isTTY) return args;
   const { createInterface } = await import('node:readline/promises');
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const name = forcedName ?? option(args, '--name') ?? ((await rl.question(`Bot name [${basename(root)}]: `)).trim() || basename(root));
-    const providerInput = (await rl.question('Model provider (google, vercel-ai-gateway, openai-chatgpt) [google]: ')).trim();
-    const provider = providerInput || 'google';
+    const providerInput = (await rl.question('Model provider (openai-chatgpt, google, vercel-ai-gateway) [openai-chatgpt]: ')).trim();
+    const provider = providerInput || 'openai-chatgpt';
     validateChoice(provider, ['google', 'vercel-ai-gateway', 'openai-chatgpt'], 'provider');
-    const model = (await rl.question('Verified model ID: ')).trim();
+    const defaultModel = provider === 'openai-chatgpt' ? 'gpt-6-luna' : undefined;
+    const model = (await rl.question(`Model ID${defaultModel ? ` [${defaultModel}]` : ''}: `)).trim() || defaultModel;
     if (!model) throw new Error('Model ID is required');
     const defaultCredential = provider === 'google' ? 'profile:google-default' : provider === 'vercel-ai-gateway' ? 'profile:vercel-ai-gateway-default' : 'oauth:openai-chatgpt:default';
     const credential = (await rl.question(`Model credential reference [${defaultCredential}]: `)).trim() || defaultCredential;

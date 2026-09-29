@@ -42,6 +42,8 @@ Disabled-by-default groups require explicit user/chat/mention/reply checks; topi
 
 Acceptance: Exercise DM and topic paths, disabled/unapproved group, reply to known/unknown message and all slash commands; no schema/secret disclosure. Enforce V019 shared-group actor restrictions for slash/native controls.
 
+Assumption: On Gate startup, publish `/new` in the Telegram private-chat command menu through `setMyCommands`, preserving existing private or inherited default commands. Update an existing Spanish private menu separately because Telegram prefers language-specific entries over the unlocalized list. This makes the already-supported reset discoverable without changing group command visibility. Offline HTTP fixtures verify menu publication and preservation; a live Telegram client remains to be checked.
+
 ## V036: Telegram delivery evidence
 
 Source: PRD §§34–35, 63 Telegram; user clarification 2026-09-22.
