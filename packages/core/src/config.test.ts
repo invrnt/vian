@@ -16,3 +16,9 @@ test('Telegram UI language defaults to Spanish and validates English', () => {
   const schema = JSON.parse(readFileSync('schema/v1.json', 'utf8'));
   expect(schema.properties.gate.properties.telegram.properties.language.default).toBe('es');
 });
+
+test('Telegram local server must be explicit and cannot point at the cloud API', () => {
+  expect(() => parseManifest({ ...input, gate: { ...input.gate, telegram: { localApi: true } } }, '/tmp/bot')).toThrow(ConfigError);
+  expect(parseManifest({ ...input, gate: { ...input.gate, telegram: { localApi: true, apiRoot: 'http://127.0.0.1:8081' } } }, '/tmp/bot').gate.telegram.localApi).toBe(true);
+  expect(() => parseManifest({ ...input, gate: { ...input.gate, telegram: { apiRoot: 'http://public.example.org' } } }, '/tmp/bot')).toThrow(ConfigError);
+});

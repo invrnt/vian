@@ -74,7 +74,7 @@ export async function doctor(args: string[], context: CommandContext): Promise<v
       const secrets = new BotSecretResolver(profiles);
       try {
         const token = await secrets.resolve(record.id, record.path, manifest.gate.credential);
-        await new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups }).validate();
+        await new TelegramGate({ ...manifest.gate.telegram, token, botId: record.id, groupsEnabled: manifest.gate.access.groups }).validate();
         add(checks, 'Telegram getMe', true, 'authenticated');
       } catch { add(checks, 'Telegram getMe', false, 'Telegram authentication or connection failed; check the bot secret and network'); }
       try {

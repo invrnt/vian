@@ -72,3 +72,13 @@ Optional scope choices are authoritative in product/platform.md, Scope interpret
 Assumption: runtime owns authorized run start/finish; optional Gate activity hooks keep transport UI outside canonical inference and history. Telegram serializes edits and cleanup per run, bounds each UI request to five seconds, and stops animation after its first transport failure. The outbox carries optional `activityRunId` correlation so only successful delivery for that run removes its indicator, including file-only answers. Empty-answer and generation-error text use a shared pure UI catalog and the manifest language; they retain the existing durable outbox path. No new dependency or storage migration is needed.
 
 Activity message IDs and timers are process-local. Normal shutdown settles active indicators, but an abrupt process death or a lost status-send acknowledgment can leave an old indicator; canonical answer/error recovery is unchanged. Telegram rejection or outage can prevent visual cleanup. These limits are separate from successful offline lifecycle validation.
+
+## Delivery repair and local Bot API
+
+Assumption: hold ambiguous multipart messages by `(destination,messageId)` rather than
+blocking an entire destination indefinitely. SQLite checks the same eligibility inside
+its transition transaction. No storage migration or automatic ambiguous retry is needed.
+The Telegram adapter passes configurable API root and long upload timeout to pinned
+grammY 1.46.0; document bodies remain streamed from the bot-scoped attachment registry.
+Local incoming paths require a configured, realpath-checked root. No token is written
+into the manifest or surfaced as a diagnostic URL.

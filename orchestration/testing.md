@@ -109,3 +109,9 @@ Foundation result at branch revision pending commit: frozen install, schema gene
 T01/T03/T06: `packages/core/src/config.test.ts`, `packages/runtime/src/runtime.test.ts` and `packages/gate-telegram/src/activity.test.ts` verify locale validation/default/schema, durable empty-output and safe failure notices, activity through tool execution/cancellation, animated topic routing, concurrent run correlation, text/file cleanup, ambiguous sends, rejected UI requests and in-flight edit/delete ordering. Telegram HTTP and provider calls are fixtures; no live compatibility claim follows.
 
 On a host running a Vian user service, isolate the systemd bus for the existing daemon E2E tests: `XDG_RUNTIME_DIR=/tmp/vian-tests-no-runtime DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/vian-tests-no-user-bus /home/cami/.bun/bin/bun run check`. Their temporary data roots alone do not isolate the host service probe. The first unisolated run exposed that pre-existing issue and its cleanup stopped the active host service; the service was restored and confirmed active before validation with both runtime directory and bus isolated. Setting only the bus address was insufficient on this host; the service was restored after that retry as well. See the activity handoff for exact evidence.
+
+2026-09-29 delivery repair: T03/T06 cover independent messages after an ambiguous
+multipart answer, continued protection against replay/reordered chunks, explicit
+local-server config, and an actual streamed 250 MiB body over loopback HTTP. This
+fixture is not live Telegram validation; live large uploads require API ID/hash and
+an operational local Bot API server.

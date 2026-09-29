@@ -415,9 +415,12 @@ export class BotRuntime {
   private async deliverPending(): Promise<void> {
     while (!this.stopped) {
       const all = await this.deps.store.listDeliveries();
+      // Retain uncertain messages without replaying them. Later independent answers
+      // must remain deliverable even if an earlier acknowledgement was lost.
+      const heldMessages = new Set(all.filter(part => part.state === 'ambiguous').map(part => `${destinationKey(part.destination)}:${part.messageId}`));
       const firstByDestination = new Map<string, OutboxPart>();
       for (const part of all) {
-        if (part.state === 'succeeded' || part.state === 'failed-terminal') continue;
+        if (part.state === 'succeeded' || part.state === 'failed-terminal' || heldMessages.has(`${destinationKey(part.destination)}:${part.messageId}`)) continue;
         const key = destinationKey(part.destination);
         if (!firstByDestination.has(key)) firstByDestination.set(key, part);
       }

@@ -4,8 +4,13 @@ export const SecretReferenceSchema = z.union([z.string().regex(/^env:[A-Za-z_][A
 export type SecretReference = z.infer<typeof SecretReferenceSchema>;
 const Model = z.strictObject({ provider: z.enum(['google','vercel-ai-gateway','openai-chatgpt']), id: z.string().min(1), credential: SecretReferenceSchema.optional() });
 const Access = z.strictObject({ mode: z.enum(['pairing','allowlist']).default('pairing'), groups: z.boolean().default(false), administratorPrincipalIds: z.array(z.string().min(1)).default([]) });
-const Telegram = z.strictObject({ language: z.enum(['es', 'en']).default('es'), streaming: z.boolean().default(true), format: z.enum(['markdown-v2','plain']).default('markdown-v2'), buttons: z.boolean().default(true), stopGeneration: z.boolean().default(true) });
-const Gate = z.strictObject({ type: z.literal('telegram'), credential: SecretReferenceSchema, access: Access.prefault({}), telegram: Telegram.prefault({}) });
+const TelegramApiRoot = z.url().refine(value => {
+  const url = new URL(value);
+  return !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' &&
+    (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
+}, 'Use HTTPS or a loopback HTTP Bot API server URL without credentials or path');
+const Telegram = z.strictObject({ apiRoot: TelegramApiRoot.default('https://api.telegram.org'), localApi: z.boolean().default(false), localFileRoot: z.string().startsWith('/').optional(), uploadTimeoutSeconds: z.number().int().min(30).max(3600).default(1800), language: z.enum(['es', 'en']).default('es'), streaming: z.boolean().default(true), format: z.enum(['markdown-v2','plain']).default('markdown-v2'), buttons: z.boolean().default(true), stopGeneration: z.boolean().default(true) });
+const Gate = z.strictObject({ type: z.literal('telegram'), credential: SecretReferenceSchema, access: Access.prefault({}), telegram: Telegram.prefault({}) }).refine(gate => !gate.telegram.localApi || new URL(gate.telegram.apiRoot).hostname !== 'api.telegram.org', { message: 'localApi requires a local Bot API server', path: ['telegram','apiRoot'] });
 const Runtime = z.strictObject({ maxSteps: z.number().int().min(1).max(100).default(12), runTimeoutSeconds: z.number().int().min(1).max(3600).default(180), perBotConcurrency: z.number().int().min(1).max(64).default(4), sameSessionPolicy: z.enum(['steer','queue']).default('steer') });
 const Context = z.strictObject({ strategy: z.literal('summary-tail').default('summary-tail'), maxRecentMessages: z.number().int().min(1).max(1000).default(80) });
 const Attachments = z.strictObject({ defaultTtlHours: z.number().int().min(1).max(8760).default(24), maxFileBytes: z.number().int().min(1).default(52428800) });

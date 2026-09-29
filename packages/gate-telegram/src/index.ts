@@ -1,3 +1,5 @@
+import { realpath } from 'node:fs/promises';
+import { sep } from 'node:path';
 import { TelegramActivity } from './activity.ts';
 import { Bot, GrammyError, InputFile } from 'grammy';
 import type { ActionId, BotId, CanonicalMessage, DeliveryOutcome, ExternalActor, ExternalDestination, GateAdapter, GateCapabilities, GateDeliveryContext, GateRuntimePorts, InboundEvent, NativeToolSet, RenderedPart, RunId } from '@vian/core';
@@ -9,6 +11,10 @@ export { normalizeMessage, type NormalizePolicy, type TelegramUpdate } from './n
 
 export interface TelegramGateOptions {
   language?: 'es' | 'en';
+  apiRoot?: string;
+  localApi?: boolean;
+  localFileRoot?: string;
+  uploadTimeoutSeconds?: number;
   token: string;
   botId: BotId;
   groupsEnabled?: boolean;
@@ -67,7 +73,8 @@ export class TelegramGate implements GateAdapter {
   private ports?: GateRuntimePorts;
 
   constructor(private readonly options: TelegramGateOptions) {
-    this.bot = options.bot ?? new Bot(options.token);
+    if (options.localApi && new URL(options.apiRoot || 'https://api.telegram.org').hostname === 'api.telegram.org') throw new Error('localApi requires a local Bot API server');
+    this.bot = options.bot ?? new Bot(options.token, { client: { apiRoot: options.apiRoot, timeoutSeconds: options.localApi ? (options.uploadTimeoutSeconds ?? 1800) : 500 } });
     this.activity = new TelegramActivity(this.bot.api, options.language);
     this.now = options.now ?? (() => new Date());
     this.fetcher = options.fetch ?? fetch;
@@ -148,7 +155,17 @@ export class TelegramGate implements GateAdapter {
       if (media && this.ports) {
         const file = await this.bot.api.getFile(media.file_id);
         if (!file.file_path || (media.file_size ?? 0) > MAX_INBOUND_BYTES) throw new Error('Telegram attachment unavailable or too large');
-        const response = await this.fetcher(`https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`);
+        let response: Response;
+        if (file.file_path.startsWith('/')) {
+          if (!this.options.localApi || !this.options.localFileRoot) throw new Error('Local Telegram downloads require localFileRoot');
+          const root = await realpath(this.options.localFileRoot);
+          const path = await realpath(file.file_path);
+          if (!path.startsWith(root + sep)) throw new Error('Telegram file is outside the configured local root');
+          response = new Response(Bun.file(path));
+        } else {
+          const apiRoot = (this.options.apiRoot || 'https://api.telegram.org').replace(/\/$/, '');
+          response = await this.fetcher(`${apiRoot}/file/bot${this.options.token}/${file.file_path}`);
+        }
         if (!response.ok || !response.body) throw new Error('Telegram attachment download failed');
         const name = 'file_name' in media && typeof media.file_name === 'string' ? media.file_name : 'photo.jpg';
         const mimeType = 'mime_type' in media && typeof media.mime_type === 'string' ? media.mime_type : 'image/jpeg';
@@ -218,23 +235,24 @@ export class TelegramGate implements GateAdapter {
       if (part.kind === 'text') {
         if (!part.text) return { kind: 'confirmed-failure', retryable: false, safeMessage: 'Empty Telegram text' };
         const base = { ...thread(destination), ...(reply_parameters ? { reply_parameters } : {}) };
-        try { sent = await this.bot.api.sendMessage(chatId, renderMarkdownV2(part.text), { ...base, parse_mode: 'MarkdownV2', ...(part.buttons ? { reply_markup: { inline_keyboard: part.buttons.map(row => row.map(button => ({ text: button.label, callback_data: button.actionId }))) } } : {}) }); }
+        const textSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+        try { sent = await this.bot.api.sendMessage(chatId, renderMarkdownV2(part.text), { ...base, parse_mode: 'MarkdownV2', ...(part.buttons ? { reply_markup: { inline_keyboard: part.buttons.map(row => row.map(button => ({ text: button.label, callback_data: button.actionId }))) } } : {}) }, textSignal as Parameters<typeof this.bot.api.sendMessage>[3]); }
         catch (error) {
           if (!(error instanceof GrammyError) || error.error_code !== 400 || !/parse|entit|format/i.test(error.description)) throw error;
           // The formatting request was explicitly rejected. A plain retry cannot duplicate it.
-          sent = await this.bot.api.sendMessage(chatId, part.text, { ...base, ...(part.buttons ? { reply_markup: { inline_keyboard: part.buttons.map(row => row.map(button => ({ text: button.label, callback_data: button.actionId }))) } } : {}) });
+          sent = await this.bot.api.sendMessage(chatId, part.text, { ...base, ...(part.buttons ? { reply_markup: { inline_keyboard: part.buttons.map(row => row.map(button => ({ text: button.label, callback_data: button.actionId }))) } } : {}) }, textSignal as Parameters<typeof this.bot.api.sendMessage>[3]);
         }
       } else {
         if (!part.attachment) return { kind: 'confirmed-failure', retryable: false, safeMessage: 'Attachment unavailable' };
-        const maxUpload = part.attachment.mimeType.startsWith('image/') ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+        const maxUpload = part.attachment.mimeType.startsWith('image/') ? 10 * 1024 * 1024 : (this.options.localApi ? 250 : 50) * 1024 * 1024;
         if (part.attachment.size > maxUpload) return { kind: 'confirmed-failure', retryable: false, safeMessage: 'Telegram file limit exceeded' };
         const opened = await context.attachments.open(context.botId, part.attachment.id);
         try {
           const input = new InputFile(opened.stream as AsyncIterable<Uint8Array>, part.attachment.name);
           const base = { ...thread(destination), ...(reply_parameters ? { reply_parameters } : {}) };
           sent = part.attachment.mimeType.startsWith('image/')
-            ? await this.bot.api.sendPhoto(chatId, input, base)
-            : await this.bot.api.sendDocument(chatId, input, base);
+            ? await this.bot.api.sendPhoto(chatId, input, base, signal as Parameters<typeof this.bot.api.sendDocument>[3])
+            : await this.bot.api.sendDocument(chatId, input, base, signal as Parameters<typeof this.bot.api.sendDocument>[3]);
         } finally { await opened.release(); }
       }
       return { kind: 'succeeded', receipt: { externalId: String(sent.message_id), sentAt: this.now().toISOString() } };

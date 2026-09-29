@@ -188,19 +188,20 @@ test('shared conversation allows approved messages but rejects another principal
   } finally { await f.close(); }
 });
 
-test('ambiguous delivery remains held and blocks later parts at that destination', async () => {
+test('ambiguous delivery remains held without blocking later independent messages', async () => {
   const f = await fixture();
   let attempts = 0;
-  f.gate.deliver = async () => { attempts++; return { kind: 'ambiguous', safeMessage: 'Response was lost' }; };
+  f.gate.deliver = async () => { attempts++; return attempts === 1 ? { kind: 'ambiguous', safeMessage: 'Response was lost' } : { kind: 'succeeded', receipt: { externalId: 'next', sentAt: new Date().toISOString() } }; };
   try {
     await f.runtime.start();
     await f.gate.emit(f.event('one', 'first'));
     await f.gate.emit(f.event('two', 'second'));
     await eventually(async () => (await f.store.listDeliveries()).length === 2);
     await f.runtime.flushDeliveries();
+    await eventually(async () => (await f.store.listDeliveries())[1]?.state === 'succeeded');
     const parts = await f.store.listDeliveries();
-    expect(attempts).toBe(1);
-    expect(parts.map(part => part.state)).toEqual(['ambiguous', 'queued']);
+    expect(attempts).toBe(2);
+    expect(parts.map(part => part.state)).toEqual(['ambiguous', 'succeeded']);
   } finally { await f.close(); }
 });
 
@@ -711,5 +712,27 @@ test('a silent provider reaches its timeout and sends an error instead of leavin
     expect(await finished).toBe('failed');
     await eventually(async () => f.gate.deliveries.length === 1);
     expect(f.gate.deliveries[0]!.part.text).toBe('No se pudo completar la solicitud. Inténtalo de nuevo.');
+  } finally { await f.close(); }
+});
+
+test('ambiguous multipart answer holds its remaining parts while a new answer is delivered', async () => {
+  const f = await fixture();
+  const render = f.gate.render.bind(f.gate);
+  let rendered = 0, delivered = 0;
+  f.gate.render = async message => {
+    const parts = await render(message);
+    return ++rendered === 1 ? [parts[0]!, { ...parts[0]!, partIndex: 1, text: 'second chunk' }] : parts;
+  };
+  f.gate.deliver = async () => ++delivered === 1 ? { kind: 'ambiguous', safeMessage: 'lost acknowledgement' } : { kind: 'succeeded', receipt: { externalId: 'new-answer', sentAt: new Date().toISOString() } };
+  try {
+    await f.runtime.start();
+    await f.gate.emit(f.event('multipart', 'first'));
+    await eventually(async () => (await f.store.listDeliveries())[0]?.state === 'ambiguous');
+    await f.gate.emit(f.event('next-message', 'second'));
+    await eventually(async () => (await f.store.listDeliveries())[2]?.state === 'succeeded');
+    const parts = await f.store.listDeliveries();
+    expect(parts.map(p => p.state)).toEqual(['ambiguous', 'queued', 'succeeded']);
+    expect((await f.store.updateDelivery(parts[1]!.id, 'sending')).kind).toBe('invalid-transition');
+    expect(delivered).toBe(2);
   } finally { await f.close(); }
 });

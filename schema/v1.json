@@ -121,6 +121,26 @@
         "telegram": {
           "type": "object",
           "properties": {
+            "apiRoot": {
+              "default": "https://api.telegram.org",
+              "type": "string",
+              "format": "uri"
+            },
+            "localApi": {
+              "default": false,
+              "type": "boolean"
+            },
+            "localFileRoot": {
+              "type": "string",
+              "format": "starts_with",
+              "pattern": "^\\/.*"
+            },
+            "uploadTimeoutSeconds": {
+              "default": 1800,
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 3600
+            },
             "language": {
               "default": "es",
               "type": "string",
@@ -151,6 +171,9 @@
             }
           },
           "required": [
+            "apiRoot",
+            "localApi",
+            "uploadTimeoutSeconds",
             "language",
             "streaming",
             "format",

@@ -67,3 +67,21 @@ On 2026-09-22 the official [Telegram Bot API](https://core.telegram.org/bots/api
 Assumption: cancellation records run_cancelled and sends a concise cancellation notice; do not persist/send unfinished assistant draft as a final answer. Never promise rollback of a tool already started. This selects the PRD's optional partial-answer policy.
 
 Optional source items excluded initially: generic audio/voice/video handling, rich-markdown output and extra Gate tools. Required photos/documents/captions, MarkdownV2, native drafts, stop and buttons remain release requirements.
+
+## V031/V036 extension: local uploads and delivery isolation (2026-09-29)
+
+The Presentation Maker user requires PPTX uploads through 250 MiB. `gate.telegram.apiRoot`
+selects a custom Bot API server and `localApi: true` enables a 250 MiB document cap;
+cloud document uploads remain capped at 50 MiB and photo uploads at 10 MiB. The bot's
+attachment registry limit applies independently. `uploadTimeoutSeconds` defaults to
+1800 for the local API. Requests honor cancellation. `localFileRoot` explicitly confines
+absolute incoming paths returned by a local server; symlinks are resolved before reading.
+HTTPS or loopback HTTP is required for configured endpoints. Migration to the local API
+requires owner-provided Telegram API ID/hash and cloud `logOut` before switching.
+
+Assumption: ambiguous output remains held, including the remaining parts of the same
+message, without automatic resend. Later independent messages to that destination may
+proceed. Runtime scheduling and the SQLite transition guard enforce the same policy.
+This replaces destination-wide blocking while preserving multipart ordering and the
+no-duplicate-send contract. Offline acceptance: stream 250 MiB over a real loopback HTTP
+connection, reject larger/cloud uploads, and resume a new message after an ambiguous one.

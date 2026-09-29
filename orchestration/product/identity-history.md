@@ -74,7 +74,7 @@ Acceptance: Fake scripted provider requests a tool then answers; test timeout, s
 
 Source: PRD §§34–35, 47, 68.8–68.9; user clarification 2026-09-22.
 
-Persist final canonical content before sending. Durable ordered multipart outbox; one destination serializes messages/files while others overlap. Track retryable/terminal failures and platform penalty windows. Ambiguous sends are held as ambiguous for review/reconciliation, never automatically retried.
+Persist final canonical content before sending. Durable ordered multipart outbox; one destination serializes messages/files while others overlap. Track retryable/terminal failures and platform penalty windows. Ambiguous sends and the remaining parts of that message are held for review/reconciliation, never automatically retried. Later independent messages to the same destination may proceed.
 
 Acceptance: Restart cannot lose canonical output or resend confirmed successes. Inject 429, confirmed rejection, pre-send failure and post-send timeout separately; only confirmed failures retry. Ambiguous state survives restart and is visible to operator; later destination parts cannot silently overtake held content.
 

@@ -209,3 +209,34 @@ describe('renderer and delivery', () => {
     expect(released).toBe(true);
   });
 });
+
+test('local Bot API streams a 250 MiB PPTX and rejects files above the configured transport cap', async () => {
+  const size = 250 * 1024 * 1024;
+  let received = 0, opened = 0, released = 0;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: size + 1024 * 1024,
+    async fetch(request) {
+      for await (const chunk of request.body!) received += chunk.byteLength;
+      return Response.json({ ok: true, result: { message_id: 250 } });
+    },
+  });
+  try {
+    const gate = new TelegramGate({ botId, token: 'fixture:token', localApi: true, apiRoot: `http://127.0.0.1:${server.port}` });
+    const attachments = { open: async () => {
+      opened++;
+      let remaining = size;
+      const chunk = new Uint8Array(1024 * 1024);
+      return { stream: new ReadableStream<Uint8Array>({ pull(c) { if (!remaining) { c.close(); return; } remaining -= chunk.length; c.enqueue(chunk); } }), release: async () => { released++; } };
+    } } as GateDeliveryContext['attachments'];
+    const part: RenderedPart = { partIndex: 0, kind: 'file', attachment: { id: 'att_fixture' as never, name: 'large.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', size } };
+    const outcome = await gate.deliver(part, destination, new AbortController().signal, { botId, attachments });
+    expect(outcome.kind).toBe('succeeded');
+    expect(received).toBeGreaterThan(size);
+    expect(received).toBeLessThan(size + 65536);
+    expect(released).toBe(1);
+    expect((await gate.deliver({ ...part, attachment: { ...part.attachment!, size: size + 1 } }, destination, new AbortController().signal, { botId, attachments })).kind).toBe('confirmed-failure');
+    expect(opened).toBe(1);
+    const cloud = new TelegramGate({ botId, token: 'fixture:token' });
+    expect((await cloud.deliver(part, destination, new AbortController().signal, { botId, attachments })).kind).toBe('confirmed-failure');
+    expect(opened).toBe(1);
+  } finally { server.stop(true); }
+}, 30_000);

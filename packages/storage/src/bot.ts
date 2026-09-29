@@ -462,10 +462,14 @@ export class SqliteBotStore implements BotStore {
           this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'delivery_failed_terminal', at: now(), payload: { partId, reason: part.safeError } });
           return invalid('Pairing code expired before delivery');
         }
-        const earlier = this.db.query(`SELECT id FROM (
-          SELECT id,destination_key,state FROM outbox WHERE delivery_sequence<?
-          UNION ALL SELECT id,destination_key,state FROM pairing_notices WHERE delivery_sequence<?
-        ) WHERE destination_key=? AND state NOT IN ('succeeded','failed-terminal') LIMIT 1`).get(row.delivery_sequence, row.delivery_sequence, key(part.destination));
+        const earlier = this.db.query(`WITH deliveries AS (
+          SELECT id,destination_key,state,message_id,delivery_sequence FROM outbox
+          UNION ALL SELECT id,destination_key,state,json_extract(part_json,'$.messageId') AS message_id,delivery_sequence FROM pairing_notices
+        ) SELECT d.id FROM deliveries d
+          WHERE d.delivery_sequence<? AND d.destination_key=? AND d.state NOT IN ('succeeded','failed-terminal')
+          AND (d.message_id=? OR NOT EXISTS (
+            SELECT 1 FROM deliveries held WHERE held.message_id=d.message_id AND held.destination_key=d.destination_key AND held.state='ambiguous'
+          )) LIMIT 1`).get(row.delivery_sequence, key(part.destination), part.messageId);
         if (earlier) return invalid('Earlier destination part is unresolved');
       }
       part.state = state; part.attempt += state === 'sending' ? 1 : 0;

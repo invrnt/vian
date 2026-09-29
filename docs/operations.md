@@ -47,3 +47,36 @@ In a bot's `vian.json`, set `gate.telegram.language` to `"es"` (the default) or 
 ```
 
 Run `vian restart <bot>` after saving. This selects interface messages, not the language of the model's answers. Spanish shows animated `Trabajando.`, `Trabajando..`, `Trabajando...`; English shows `Working`. The indicator disappears when Telegram confirms answer delivery. Empty successful output produces `Sin Respuesta` / `No Response`; provider errors retain the safe error notice in the selected language. Completion awaiting delivery uses `Hecho` / `Done`, cancellation has a stopped notice, and delivery problems show an error. UI failures do not discard model output. Abrupt process termination or Telegram outages may leave an old status message.
+
+### Telegram documents up to 250 MiB
+
+The cloud Bot API accepts documents through 50 MiB. Larger files require the official
+[local Bot API server](https://github.com/tdlib/telegram-bot-api), started with `--local`,
+your own `TELEGRAM_API_ID` and `TELEGRAM_API_HASH`, and a loopback listener. Keep those
+credentials in a private systemd EnvironmentFile, not in `vian.json`. Stop the bot,
+call `logOut` on its old API, then switch the manifest and start it again. Cloud login
+is unavailable for ten minutes after logOut; do not attempt migration before the local
+server is ready. The bot token remains the existing bot-local credential.
+
+```json
+{
+  "gate": {
+    "telegram": {
+      "apiRoot": "http://127.0.0.1:8081",
+      "localApi": true,
+      "localFileRoot": "/absolute/path/to/telegram-bot-api-data",
+      "uploadTimeoutSeconds": 1800
+    }
+  },
+  "attachments": { "maxFileBytes": 262144000 }
+}
+```
+
+Merge these fields with the existing configuration; preserve gate type/credential,
+access policy and model settings. `localFileRoot` must match the API server's data
+folder for inbound attachments. Restart the bot after changing tools or config.
+The outbound cap is 250 MiB; raising only maxFileBytes does not bypass cloud limits.
+
+Uncertain deliveries remain visible in status/history and are not automatically
+resent. Their remaining message parts remain held, while later independent answers
+can be delivered. A restart preserves this distinction.

@@ -38,7 +38,7 @@ export async function connectTelegram(args: string[], context: CommandContext): 
   const reference = manifest.gate.credential;
   if (!reference.startsWith('env:')) throw new Error('Set this bot\'s Telegram credential to an env: reference in vian.json.');
   const token = await readHiddenLine('Telegram bot token (hidden): ');
-  try { await new TelegramGate({ token, botId: record.id }).validate(); }
+  try { await new TelegramGate({ ...manifest.gate.telegram, token, botId: record.id }).validate(); }
   catch { throw new Error('Telegram did not accept the token or could not be reached; credential was not saved.'); }
   await saveTelegramToken(record.path, reference.slice(4), token);
   context.stdout(`Telegram token saved for ${record.alias}.\n`);
