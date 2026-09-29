@@ -66,3 +66,9 @@ Release metadata and checksum requests keep a 30-second deadline; standalone art
 Foundation must establish exact package versions, build/test scripts, schema generation and control framing through minimal compatibility probes. contracts.md defines the required seam decisions, including C09 for the user-approved safe steering default. The original PRD queue default is superseded by product/identity-history.md V044. Do not publish or depend on the example `vian.dev` schema URL without an established hosting/release contract; generate a local schema first.
 
 Optional scope choices are authoritative in product/platform.md, Scope interpretation. Global concurrency, TTLs, retry limits and throttles need named, tested bounded values; safety-sensitive choices belong in the relevant product decision sections.
+
+## Telegram activity lifecycle
+
+Assumption: runtime owns authorized run start/finish; optional Gate activity hooks keep transport UI outside canonical inference and history. Telegram serializes edits and cleanup per run, bounds each UI request to five seconds, and stops animation after its first transport failure. The outbox carries optional `activityRunId` correlation so only successful delivery for that run removes its indicator, including file-only answers. Empty-answer and generation-error text use a shared pure UI catalog and the manifest language; they retain the existing durable outbox path. No new dependency or storage migration is needed.
+
+Activity message IDs and timers are process-local. Normal shutdown settles active indicators, but an abrupt process death or a lost status-send acknowledgment can leave an old indicator; canonical answer/error recovery is unchanged. Telegram rejection or outage can prevent visual cleanup. These limits are separate from successful offline lifecycle validation.

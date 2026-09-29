@@ -1,3 +1,4 @@
+import { TelegramActivity } from './activity.ts';
 import { Bot, GrammyError, InputFile } from 'grammy';
 import type { ActionId, BotId, CanonicalMessage, DeliveryOutcome, ExternalActor, ExternalDestination, GateAdapter, GateCapabilities, GateDeliveryContext, GateRuntimePorts, InboundEvent, NativeToolSet, RenderedPart, RunId } from '@vian/core';
 import { chunkMarkdown, escapeMarkdownV2, renderMarkdownV2 } from './render.ts';
@@ -7,6 +8,7 @@ export { chunkMarkdown, escapeMarkdownV2, renderMarkdownV2 } from './render.ts';
 export { normalizeMessage, type NormalizePolicy, type TelegramUpdate } from './normalize.ts';
 
 export interface TelegramGateOptions {
+  language?: 'es' | 'en';
   token: string;
   botId: BotId;
   groupsEnabled?: boolean;
@@ -51,6 +53,7 @@ export function classifyTelegramFailure(error: unknown): DeliveryOutcome {
 export class TelegramGate implements GateAdapter {
   readonly type = 'telegram' as const;
   readonly bot: Bot;
+  private readonly activity: TelegramActivity;
   private readonly now: () => Date;
   private readonly fetcher: typeof fetch;
   private readonly policy: NormalizePolicy;
@@ -65,6 +68,7 @@ export class TelegramGate implements GateAdapter {
 
   constructor(private readonly options: TelegramGateOptions) {
     this.bot = options.bot ?? new Bot(options.token);
+    this.activity = new TelegramActivity(this.bot.api, options.language);
     this.now = options.now ?? (() => new Date());
     this.fetcher = options.fetch ?? fetch;
     this.policy = { groupsEnabled: options.groupsEnabled ?? false, approvedChatIds: options.approvedChatIds ?? new Set(), approvedUserIds: options.approvedUserIds ?? new Set() };
@@ -121,7 +125,11 @@ export class TelegramGate implements GateAdapter {
       }
     }
   }
+  startActivity(runId: RunId, destination: ExternalDestination): Promise<void> { return this.activity.start(runId, destination); }
+  finishActivity(runId: RunId, outcome: 'completed' | 'failed' | 'cancelled'): Promise<void> { return this.activity.finish(runId, outcome); }
+
   async stop(): Promise<void> {
+    await this.activity.stop();
     for (const draft of this.drafts.values()) if (draft.timer) clearInterval(draft.timer);
     this.drafts.clear();
     this.started = false;
@@ -190,6 +198,15 @@ export class TelegramGate implements GateAdapter {
   }
 
   async deliver(part: RenderedPart, destination: ExternalDestination, signal: AbortSignal, context: GateDeliveryContext): Promise<DeliveryOutcome> {
+    const outcome = await this.deliverPart(part, destination, signal, context);
+    if (part.activityRunId) {
+      if (outcome.kind === 'succeeded') await this.activity.remove(part.activityRunId);
+      else await this.activity.finish(part.activityRunId, outcome.kind === 'ambiguous' ? 'delivery-unknown' : 'delivery-failed');
+    }
+    return outcome;
+  }
+
+  private async deliverPart(part: RenderedPart, destination: ExternalDestination, signal: AbortSignal, context: GateDeliveryContext): Promise<DeliveryOutcome> {
     const key = destinationKey(destination);
     const remaining = (this.penaltyUntil.get(key) ?? 0) - this.now().getTime();
     if (remaining > 0) return { kind: 'confirmed-failure', retryable: true, safeMessage: 'Telegram rate limit', retryAfterMs: remaining };

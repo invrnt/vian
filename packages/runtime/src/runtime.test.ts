@@ -20,7 +20,7 @@ const model = () => new MockLanguageModelV4({ doStream: async () => ({ stream: n
   controller.close();
 } }) }) });
 
-async function fixture(options: { model?: MockLanguageModelV4; tools?: import('@vian/core').NativeToolSet; attachments?: AttachmentPort; sameSessionPolicy?: 'steer' | 'queue'; groups?: boolean } = {}) {
+async function fixture(options: { model?: MockLanguageModelV4; tools?: import('@vian/core').NativeToolSet; attachments?: AttachmentPort; sameSessionPolicy?: 'steer' | 'queue'; groups?: boolean; runTimeoutSeconds?: number; language?: 'es' | 'en' } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'vian-runtime-'));
   await writeFile(join(root, 'VIAN.md'), 'Follow the user request.');
   const botId = randomUUID() as BotId;
@@ -33,7 +33,7 @@ async function fixture(options: { model?: MockLanguageModelV4; tools?: import('@
   await store.bindDestination(destination, conversation, principal);
   const gate = new FakeGate();
   const provider: ProviderAdapter = { id: 'fake', async resolveModel() { return options.model ?? model(); } };
-  const manifest = parseManifest({ schemaVersion: 1, id: botId, name: 'Fixture', model: { provider: 'google', id: 'fake' }, gate: { type: 'telegram', credential: 'env:FAKE', access: { groups: options.groups ?? false } }, runtime: { sameSessionPolicy: options.sameSessionPolicy } }, root);
+  const manifest = parseManifest({ schemaVersion: 1, id: botId, name: 'Fixture', model: { provider: 'google', id: 'fake' }, gate: { type: 'telegram', credential: 'env:FAKE', access: { groups: options.groups ?? false }, telegram: { language: options.language } }, runtime: { sameSessionPolicy: options.sameSessionPolicy, runTimeoutSeconds: options.runTimeoutSeconds } }, root);
   const attachments = { async register() { throw new Error('unused'); }, async ingest() { throw new Error('unused'); }, async open() { throw new Error('unused'); }, async list() { return []; }, async expire() { return 0; } } as AttachmentPort;
   const runtime = new BotRuntime({ botId, botRoot: root, manifest, store, gate, provider, attachments: options.attachments ?? attachments, tools: options.tools });
   const event = (id: string, text: string): InboundEvent => ({ gate: 'telegram', externalEventId: id, actor, destination, receivedAt: new Date().toISOString(), kind: 'message', parts: [{ type: 'text', text }] });
@@ -246,7 +246,7 @@ test('provider failure after partial text ends the run without leaking its error
     for await (const item of f.store.history({ limit: 100 })) history.push(JSON.stringify(item));
     expect(history.join('\n')).not.toContain('private-provider-detail');
     await eventually(async () => f.gate.deliveries.length === 1);
-    expect(f.gate.deliveries[0]?.part.text).toBe('The request could not be completed. Please try again.');
+    expect(f.gate.deliveries[0]?.part.text).toBe('No se pudo completar la solicitud. Inténtalo de nuevo.');
   } finally { await f.close(); }
 });
 
@@ -257,16 +257,21 @@ test('authorized stop cancels the active run without delivering hidden output', 
   const started = new Promise<void>(resolve => { toolStarted = resolve; });
   const scripted = new MockLanguageModelV4({ doStream: async () => stream([{ type: 'tool-call', toolCallId: 'call-1', toolName: 'wait', input: '{}' }], 'tool-calls') });
   const f = await fixture({ model: scripted, tools: { wait: { description: 'wait', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, async execute() { toolStarted(); await held; return 'done'; } } } });
+  const activity: string[] = [];
+  Object.assign(f.gate, { async startActivity() { activity.push('working'); }, async finishActivity(_id: RunId, outcome: string) { activity.push(outcome); } });
   try {
     await f.runtime.start();
     await f.gate.emit(f.event('one', 'start'));
     await started;
+    expect(activity).toEqual(['working']);
     await f.gate.emit({ ...f.event('stop', ''), kind: 'control', control: 'stop', parts: [] });
     releaseTool();
     await eventually(async () => {
       for await (const event of f.store.history({ limit: 100 })) if (event.kind === 'run_cancelled') return true;
       return false;
     });
+    await eventually(async () => activity.includes('cancelled'));
+    expect(activity).toEqual(['working', 'cancelled']);
     expect(f.gate.deliveries).toHaveLength(0);
   } finally { releaseTool(); await f.close(); }
 });
@@ -651,6 +656,60 @@ test('one bot provider failure does not stop another bot', async () => {
     await eventually(async () => healthy.gate.deliveries.length === 1);
     expect(healthy.gate.deliveries[0]?.part.text).toBe('hello');
     await eventually(async () => broken.gate.deliveries.length === 1);
-    expect(broken.gate.deliveries[0]?.part.text).toContain('could not be completed');
+    expect(broken.gate.deliveries[0]?.part.text).toContain('No se pudo completar');
   } finally { await broken.close(); await healthy.close(); }
+});
+
+for (const language of ['es', 'en'] as const) {
+  test(`empty successful inference produces a durable ${language} notice`, async () => {
+    const f = await fixture({ language, model: new MockLanguageModelV4({ doStream: async () => stream(textParts('   ')) }) });
+    const activity: string[] = [];
+    Object.assign(f.gate, {
+      async startActivity() { activity.push('working'); },
+      async finishActivity(_id: RunId, outcome: string) { activity.push(outcome); },
+    });
+    try {
+      await f.runtime.start();
+      await f.gate.emit(f.event('empty', 'hello'));
+      await eventually(async () => f.gate.deliveries.length === 1 && activity.includes('completed'));
+      expect(activity).toEqual(['working', 'completed']);
+      expect(f.gate.deliveries[0]!.part.text).toBe(language === 'es' ? 'Sin Respuesta' : 'No Response');
+      expect(f.gate.deliveries[0]!.part.activityRunId).toBeDefined();
+      const deliveries = await f.store.listDeliveries();
+      expect(deliveries[0]!.part.activityRunId).toBe(f.gate.deliveries[0]!.part.activityRunId);
+    } finally { await f.close(); }
+  });
+  test(`provider failure preserves a safe ${language} error even when activity fails`, async () => {
+    const f = await fixture({ language, model: new MockLanguageModelV4({ doStream: async () => stream([{ type: 'error', error: new Error('private-detail') }]) }) });
+    const outcomes: string[] = [];
+    Object.assign(f.gate, {
+      async startActivity() { throw new Error('Telegram unavailable'); },
+      async finishActivity(_id: RunId, outcome: string) { outcomes.push(outcome); },
+    });
+    try {
+      await f.runtime.start();
+      await f.gate.emit(f.event('error', 'hello'));
+      await eventually(async () => f.gate.deliveries.length === 1 && outcomes.length === 1);
+      expect(outcomes).toEqual(['failed']);
+      expect(f.gate.deliveries[0]!.part.text).toBe(language === 'es' ? 'No se pudo completar la solicitud. Inténtalo de nuevo.' : 'The request could not be completed. Please try again.');
+      expect(f.gate.deliveries[0]!.part.activityRunId).toBeDefined();
+    } finally { await f.close(); }
+  });
+}
+
+test('a silent provider reaches its timeout and sends an error instead of leaving working active', async () => {
+  const scripted = new MockLanguageModelV4({ doStream: async ({ abortSignal }) => ({ stream: new ReadableStream({
+    start(controller) { abortSignal?.addEventListener('abort', () => controller.error(abortSignal.reason), { once: true }); },
+  }) }) });
+  const f = await fixture({ model: scripted, runTimeoutSeconds: 1 });
+  let finish!: (outcome: string) => void;
+  const finished = new Promise<string>(resolve => { finish = resolve; });
+  Object.assign(f.gate, { async startActivity() {}, async finishActivity(_id: RunId, outcome: string) { finish(outcome); } });
+  try {
+    await f.runtime.start();
+    await f.gate.emit(f.event('timeout', 'hello'));
+    expect(await finished).toBe('failed');
+    await eventually(async () => f.gate.deliveries.length === 1);
+    expect(f.gate.deliveries[0]!.part.text).toBe('No se pudo completar la solicitud. Inténtalo de nuevo.');
+  } finally { await f.close(); }
 });

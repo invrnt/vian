@@ -121,6 +121,14 @@
         "telegram": {
           "type": "object",
           "properties": {
+            "language": {
+              "default": "es",
+              "type": "string",
+              "enum": [
+                "es",
+                "en"
+              ]
+            },
             "streaming": {
               "default": true,
               "type": "boolean"
@@ -143,6 +151,7 @@
             }
           },
           "required": [
+            "language",
             "streaming",
             "format",
             "buttons",

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { generateText, jsonSchema, stepCountIs, streamText, tool, type ModelMessage } from 'ai';
 import type { ActionId, AttachmentId, AttachmentPort, AuditEvent, BotId, BotManifest, BotStore, CanonicalMessage, ConversationId, ExternalDestination, GateAdapter, InboxRecord, InboundEvent, MessageId, MessagePart, NativeToolSet, OutboxPart, PrincipalId, ProviderAdapter, RunId, SessionId, ToolCallId, ToolContext } from '@vian/core';
+import { uiMessages } from '@vian/core';
 export { AccessService } from './access.ts';
 
 export interface RuntimeDependencies {
@@ -168,11 +169,16 @@ export class BotRuntime {
       this.active.set(sessionId, { runId, initiator: principalId, abort });
       this.runningCount++;
       let releaseGlobal: (() => void) | undefined;
+      let activityOutcome: 'completed' | 'failed' | 'cancelled' = 'completed';
       try {
         releaseGlobal = await this.deps.globalRunPermit?.acquire(abort.signal);
+        abort.signal.throwIfAborted();
+        await this.deps.gate.startActivity?.(runId, input.event.destination).catch(() => {});
+        abort.signal.throwIfAborted();
         await this.execute(runId, input, principalId, abort.signal);
       }
       catch (error) {
+        activityOutcome = abort.signal.aborted ? 'cancelled' : 'failed';
         let failure: CanonicalMessage | undefined;
         let failureParts: OutboxPart[] | undefined;
         if (!abort.signal.aborted) {
@@ -180,9 +186,9 @@ export class BotRuntime {
           const context = stillBound === principalId && await this.deps.store.resolveDestination(input.event.destination, principalId);
           if (context && context.sessionId === sessionId) {
             try {
-              failure = { id: asId<MessageId>(randomUUID()), botId: this.deps.botId, conversationId: context.conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: 'The request could not be completed. Please try again.' }], createdAt: this.now().toISOString() };
+              failure = { id: asId<MessageId>(randomUUID()), botId: this.deps.botId, conversationId: context.conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: uiMessages[this.deps.manifest.gate.telegram.language].failed }], createdAt: this.now().toISOString() };
               const rendered = await this.deps.gate.render(failure);
-              failureParts = rendered.map(part => ({ id: randomUUID(), botId: this.deps.botId, messageId: failure!.id, destination: input.event.destination, part, state: 'queued', attempt: 0 }));
+              failureParts = rendered.map(part => ({ id: randomUUID(), botId: this.deps.botId, messageId: failure!.id, destination: input.event.destination, part: { ...part, activityRunId: runId }, state: 'queued', attempt: 0 }));
             } catch { failure = undefined; failureParts = undefined; }
           }
         }
@@ -190,6 +196,7 @@ export class BotRuntime {
         if (failureParts?.length) void this.flushDeliveries();
         this.log.error(`Run ${runId} failed: ${safeError(error)}`);
       } finally {
+        await this.deps.gate.finishActivity?.(runId, activityOutcome).catch(() => {});
         releaseGlobal?.();
         this.runningCount--;
         this.active.delete(sessionId);
@@ -301,10 +308,10 @@ export class BotRuntime {
       }).at(-1);
       const sentAttachments = toolOutput.flatMap(value => value && typeof value === 'object' && 'kind' in value && value.kind === 'attachment-send' && 'attachmentId' in value ? [value.attachmentId as AttachmentId] : []);
       const files = await this.deps.attachments.list(this.deps.botId, sentAttachments);
-      const finalMessage: CanonicalMessage = { id: asId<MessageId>(randomUUID()), botId: this.deps.botId, conversationId: ctx.conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: presentation?.text ?? finalText }, ...files.map(file => ({ type: 'attachment' as const, attachmentId: file.id, name: file.name, mimeType: file.mimeType }))], createdAt: this.now().toISOString() };
+      const finalMessage: CanonicalMessage = { id: asId<MessageId>(randomUUID()), botId: this.deps.botId, conversationId: ctx.conversationId, sessionId, runId, role: 'assistant', parts: [{ type: 'text', text: presentation?.text ?? (finalText.trim() ? finalText : files.length ? '' : uiMessages[this.deps.manifest.gate.telegram.language].noResponse) }, ...files.map(file => ({ type: 'attachment' as const, attachmentId: file.id, name: file.name, mimeType: file.mimeType }))], createdAt: this.now().toISOString() };
       const rendered = await this.deps.gate.render(finalMessage);
       if (presentation?.rows.length && rendered[0]) rendered[0].buttons = presentation.rows;
-      const parts: OutboxPart[] = rendered.map(part => ({ id: randomUUID(), botId: this.deps.botId, messageId: finalMessage.id, destination: input.event.destination, part, state: 'queued', attempt: 0 }));
+      const parts: OutboxPart[] = rendered.map(part => ({ id: randomUUID(), botId: this.deps.botId, messageId: finalMessage.id, destination: input.event.destination, part: { ...part, activityRunId: runId }, state: 'queued', attempt: 0 }));
       const completed = await this.deps.store.completeRun(runId, finalMessage, parts);
       if (completed.kind !== 'ok') throw new Error(completed.reason);
       void this.flushDeliveries();

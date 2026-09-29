@@ -60,7 +60,7 @@ export async function validateBot(record: RegistryRecord): Promise<void> {
     await mcp.start(manifest.mcp);
     assertUniqueToolNames([Object.keys(native.tools), mcp.definitions().map(tool => tool.name)]);
     await providerFor(manifest, secrets, profiles).resolveModel({ botId: record.id, botRoot: record.path, modelId: manifest.model.id, credential: manifest.model.credential });
-    await new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups }).validate();
+    await new TelegramGate({ token, botId: record.id, language: manifest.gate.telegram.language, groupsEnabled: manifest.gate.access.groups }).validate();
   } finally { await mcp.close(); await native.dispose(); }
 }
 
@@ -85,7 +85,7 @@ export async function assembleBot(record: RegistryRecord, logger: { info(message
       const currentStore = store;
       const attachments = new AttachmentRegistry(id => id === record.id ? { root: record.path, store: currentStore } : undefined, manifest.attachments.maxFileBytes, manifest.attachments.defaultTtlHours);
       attachments.trackBot(record.id);
-      const gate = new TelegramGate({ token, botId: record.id, groupsEnabled: manifest.gate.access.groups, onFatal: () => logger.error('Telegram polling failed; retrying') });
+      const gate = new TelegramGate({ token, botId: record.id, language: manifest.gate.telegram.language, groupsEnabled: manifest.gate.access.groups, onFatal: () => logger.error('Telegram polling failed; retrying') });
       const mcpTools = Object.fromEntries(mcp.definitions().map(definition => [definition.name, {
         description: definition.description, inputSchema: definition.inputSchema,
         execute: async (input: unknown, context: Parameters<NonNullable<typeof native.tools[string]['execute']>>[1]) => {

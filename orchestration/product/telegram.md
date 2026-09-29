@@ -26,6 +26,14 @@ Throttle and refresh native streaming drafts, finish with persisted final delive
 
 Acceptance: Test native draft lifecycle, adaptive throttle, expiry refresh, stream failure, authorization and abort during tool phase. Verify pinned API method support live. Partial-answer handling follows the decision below.
 
+### V033 extension: localized activity feedback (2026-09-29)
+
+User requirement: show a temporary animated working message throughout authorized inference, remove it when an answer reaches Telegram, and provide automatic feedback for empty output. Preserve visible generation errors and translate the UI into Spanish and English, configurable per bot with Spanish as default.
+
+Assumption: `gate.telegram.language` selects `es` (default) or `en` for bot interface copy, independently of the model's response language. Animate `Trabajando.` / `Working.` by cycling one to three dots every 1.5 seconds on one silent message per run, including tool execution. On completion, stop animating and use `Hecho` / `Done` until confirmed answer delivery removes the indicator. A successful run without non-whitespace text, buttons or attachments emits a durable `Sin Respuesta` / `No Response` answer. Files and buttons count as responses. Existing safe generation failures remain durable, localized error answers; cancellation displays a localized stopped notice. Delivery failures and uncertain outcomes remain visibly distinct from empty successful inference.
+
+Acceptance: T03/T06 fixtures cover both locales, empty answers, tool phase/cancellation, provider errors, topic/run isolation, text/file delivery, animation/cleanup races and Telegram UI failures. Activity is best-effort transport UI: if deletion is rejected, replace it with the localized completion label; do not discard or retry a canonical answer because UI cleanup failed.
+
 ## V034: Inline callbacks
 
 Source: PRD §§20.9, 42, 49.6.

@@ -8,3 +8,11 @@ describe('C01 manifest',()=>{
   test('rejects future schema and unknown fields with path',()=>{ expect(()=>parseManifest({...input,schemaVersion:2},'/tmp/bot')).toThrow(ConfigError); expect(()=>parseManifest({...input,extra:true},'/tmp/bot')).toThrow('/tmp/bot'); });
   test('generated schema has the same required authority',()=>{ const schema=JSON.parse(readFileSync('schema/v1.json','utf8')); expect(schema.properties.schemaVersion.const).toBe(1); expect(schema.properties.runtime.properties.sameSessionPolicy.default).toBe('steer'); });
 });
+
+test('Telegram UI language defaults to Spanish and validates English', () => {
+  expect(parseManifest(input, '/tmp/bot').gate.telegram.language).toBe('es');
+  expect(parseManifest({ ...input, gate: { ...input.gate, telegram: { language: 'en' } } }, '/tmp/bot').gate.telegram.language).toBe('en');
+  expect(() => parseManifest({ ...input, gate: { ...input.gate, telegram: { language: 'fr' } } }, '/tmp/bot')).toThrow(ConfigError);
+  const schema = JSON.parse(readFileSync('schema/v1.json', 'utf8'));
+  expect(schema.properties.gate.properties.telegram.properties.language.default).toBe('es');
+});

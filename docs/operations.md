@@ -34,3 +34,16 @@ On Linux, `vian service install` writes a systemd user unit; then use `vian serv
 To remove a default installation after stopping the daemon or uninstalling the service, remove `$HOME/.local/bin/vian` and `$HOME/.local/bin/.vian-app`. For a custom `install.sh --dir`, remove those two paths from that directory. Vian keeps global registry data under `${XDG_DATA_HOME:-$HOME/.local/share}/vian` and credential profiles under `${VIAN_HOME:-$HOME/.local/share/vian}/credentials`. Bot configuration, `.env`, history and attachments remain in each bot directory. Remove these separately only when you no longer need them; uninstalling the command or service preserves them.
 
 Bot diagnostic logs rotate under `.vian/runtime.log` and never replace the SQLite audit. A delivery with an unknown Telegram outcome is held for local inspection rather than resent automatically. `vian history <bot> --jsonl` and `vian doctor <bot>` work while the daemon is stopped. SQLite and attachment backups should include the whole `.vian/` directory, with filesystem permissions preserved.
+
+
+### Telegram status language
+
+In a bot's `vian.json`, set `gate.telegram.language` to `"es"` (the default) or `"en"`. Merge this into the existing gate configuration, retaining its credential and access fields:
+
+```json
+"telegram": {
+  "language": "es"
+}
+```
+
+Run `vian restart <bot>` after saving. This selects interface messages, not the language of the model's answers. Spanish shows animated `Trabajando.`, `Trabajando..`, `Trabajando...`; English shows `Working`. The indicator disappears when Telegram confirms answer delivery. Empty successful output produces `Sin Respuesta` / `No Response`; provider errors retain the safe error notice in the selected language. Completion awaiting delivery uses `Hecho` / `Done`, cancellation has a stopped notice, and delivery problems show an error. UI failures do not discard model output. Abrupt process termination or Telegram outages may leave an old status message.
