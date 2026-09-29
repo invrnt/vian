@@ -34,8 +34,8 @@ function assetUrl(asset: Asset, tag: string): string {
   return url.href;
 }
 
-async function getResponse(url: string, fetcher: typeof fetch, accept = 'application/octet-stream'): Promise<Response> {
-  const response = await fetcher(url, { headers: { Accept: accept, 'User-Agent': 'vian-updater' }, signal: AbortSignal.timeout(30_000) });
+async function getResponse(url: string, fetcher: typeof fetch, accept = 'application/octet-stream', timeoutMs = 30_000): Promise<Response> {
+  const response = await fetcher(url, { headers: { Accept: accept, 'User-Agent': 'vian-updater' }, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(`Release request failed (HTTP ${response.status})`);
   return response;
 }
@@ -66,7 +66,7 @@ function expectedChecksum(text: string, name: string): string {
 }
 
 async function download(url: string, dest: string, fetcher: typeof fetch): Promise<string> {
-  const response = await getResponse(url, fetcher);
+  const response = await getResponse(url, fetcher, 'application/octet-stream', 300_000);
   if (!response.body) throw new Error('Release asset response was empty');
   const hash = createHash('sha256');
   let bytes = 0;
@@ -134,6 +134,7 @@ export async function updateCommand(args: string[], context: CommandContext, opt
     const staging = await mkdtemp(join(dirname(installed), '.vian-update-'));
     try {
       const candidate = join(staging, basename(installed));
+      context.stdout(`Downloading ${release.tag_name} (${name}); this may take several minutes.\n`);
       const actual = await download(assetUrl(binary, release.tag_name), candidate, fetcher);
       if (actual !== expected) throw new Error(`Checksum mismatch for ${name}`);
       await chmod(candidate, 0o755);

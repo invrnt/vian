@@ -59,6 +59,8 @@ Linux uses a same-user Unix socket. Isolate platform path/control/service handli
 
 ## Open technical decisions
 
+Assumption: release metadata and checksum requests keep a 30-second deadline; an artifact download gets five minutes because Linux standalone assets are about 88 MB and may exceed 30 seconds on a slower link. The updater still verifies SHA-256 and executes the candidate before atomic replacement. The 2026-09-29 Debian timeout report and a real preview update validate this bound.
+
 Foundation must establish exact package versions, build/test scripts, schema generation and control framing through minimal compatibility probes. contracts.md defines the required seam decisions, including C09 for the user-approved safe steering default. The original PRD queue default is superseded by product/identity-history.md V044. Do not publish or depend on the example `vian.dev` schema URL without an established hosting/release contract; generate a local schema first.
 
 Optional scope choices are authoritative in product/platform.md, Scope interpretation. Global concurrency, TTLs, retry limits and throttles need named, tested bounded values; safety-sensitive choices belong in the relevant product decision sections.

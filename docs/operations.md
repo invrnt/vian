@@ -4,6 +4,8 @@ The daemon loads enabled registered bots. One bot's invalid configuration does n
 
 `vian daemon` starts a background process and returns after startup. Repeating it reports that the daemon is already running. `vian daemon stop|restart` controls the whole process; `vian daemon --foreground` keeps it attached to the terminal. Use `vian status` and `vian logs <bot>` to inspect a bot. `vian restart <bot>` reloads only that bot.
 
+`vian update` downloads the newest published compatible release and verifies its SHA-256 before replacing the installed command. Standalone Linux binaries are large, so the download can take several minutes. Restart a running daemon or service after the update to load the new code.
+
 ```sh
 vian list
 vian status

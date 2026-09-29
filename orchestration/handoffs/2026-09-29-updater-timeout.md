@@ -1,0 +1,7 @@
+# Debian updater download deadline
+
+Source revision: `c6d8d29` (`v0.1.0-preview.7`). The user ran `vian update` and received `The operation timed out`; the current maintainer reproduced it with `vian update --version v0.1.0-preview.7` on Debian.
+
+The published `vian-linux-x64` asset is 87,795,168 bytes. The installed updater applied one 30-second AbortSignal to the entire asset stream. Prior attempts left partial download files of about 1.4, 7.4 and 31 MB. The corrected updater retains 30 seconds for release metadata and checksums, allows five minutes for the artifact, and reports which asset it is downloading. SHA-256 verification, executable smoke check and atomic replacement remain required.
+
+Dependency baseline: Bun 1.4.2, TypeScript 7.0.2, and root/package lockfile pins unchanged. No new packages or external code are used. The existing `v0.1.0-preview.7` [release metadata](https://api.github.com/repos/invrnt/vian/releases/tags/v0.1.0-preview.7) was retrieved on 2026-09-29 and supplied the exact asset size. `/home/cami/.bun/bin/bun run typecheck` and `git diff --check` passed; the tag's release workflow runs the full check/build gate. A live update result will be reported separately after publication.

@@ -66,6 +66,8 @@ Resource bottlenecks are now dependencies and shared ownership rather than agent
 
 ## Ownership transfers and extensions
 
+Post-release updater correction (2026-09-29, source `c6d8d29`): the user's `vian update` timeout report transfers `packages/cli/src/update.ts` and the corresponding operations handoff/documentation to the current maintainer. The release agent's prior assignment is complete. This scope covers the download timeout needed for the published Debian artifact; no other implementation path is transferred.
+
 Post-release extension (2026-09-28, source `7014bf4` plus the uncommitted Luna/vision work): the user's Telegram menu correction transfers `packages/gate-telegram/src/` and its colocated tests to the current maintainer for command publication. The maintainer also owns the corresponding Telegram product note and handoff. No former agent is active on those paths. The existing `packages/core/src/storage.ts` transfer remains untouched.
 
 Post-release assignment (2026-09-28, source `7014bf4`): the user directly assigned the current maintainer to set GPT-6 Luna as the Debian Vian default and repair inbound image handling. H's release assignment is complete. The current maintainer exclusively owns the affected `packages/cli/src/local/`, `packages/runtime/`, `packages/provider-openai-chatgpt/` tests, `README.md`, `docs/`, and relevant product/architecture/handoff documentation for this change. The special `packages/core/src/storage.ts` transfer remains untouched. No other agent is active on these paths.
