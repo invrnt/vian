@@ -51,3 +51,10 @@ Source: PRD §§17.5, 48, 51, 56.
 Delete expired bytes through lightweight shared infrequent maintenance; retain metadata with expired/deleted status and unavailable path. Keep history indefinitely and logs bounded.
 
 Acceptance: Advance fake clock through TTL and active delivery: no deleted file remains usable, metadata/history survive, cleanup failures are logged safely and retried without busy polling.
+
+Assumption: trusted tools may register generated attachments with `deleteAfterDelivery=true`.
+After a durably confirmed delivery, bytes become eligible for cleanup once all known
+outbox consumers finish (success or terminal failure). Failed/ambiguous delivery
+alone never triggers early deletion. TTL remains the upper bound, except while a
+reader is active. Sweep at startup, after delivery, and every minute; preserve audit
+metadata. This opt-in avoids changing retention of ordinary bot attachments.

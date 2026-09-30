@@ -505,7 +505,7 @@ export class SqliteBotStore implements BotStore {
     if (!/^[0-9a-f]{64}$/.test(metadata.sha256)) throw new Error('Attachment SHA-256 must be lowercase hex');
     if (metadata.origin !== 'generated' && metadata.origin !== 'inbound') throw new Error('Unsupported attachment origin');
     this.db.transaction(() => {
-      this.db.query('INSERT INTO attachments(id,public_json,private_path,expires_at,sha256,origin,created_at) VALUES (?,?,?,?,?,?,?)').run(attachment.id, json(attachment), privatePath, expiresAt, metadata.sha256, metadata.origin, metadata.createdAt);
+      this.db.query('INSERT INTO attachments(id,public_json,private_path,expires_at,sha256,origin,created_at,delete_after_delivery) VALUES (?,?,?,?,?,?,?,?)').run(attachment.id, json(attachment), privatePath, expiresAt, metadata.sha256, metadata.origin, metadata.createdAt, metadata.deleteAfterDelivery ? 1 : 0);
       this.audit({ id: randomUUID() as EventId, botId: this.botId, kind: 'attachment_registered', at: now(), payload: { attachment, metadata } });
     }).immediate();
   }
@@ -518,7 +518,7 @@ export class SqliteBotStore implements BotStore {
     return row ? { public: JSON.parse(row.public_json), privatePath: row.private_path, expiresAt: row.expires_at, status: row.status === 'available' && row.expires_at <= now() ? 'expired' : row.status, ...(row.sha256 && row.origin && row.created_at ? { metadata: { sha256: row.sha256, origin: row.origin, createdAt: row.created_at } } : {}) } : undefined;
   }
   async listExpiredAttachments(at: string): Promise<{ id: AttachmentId; privatePath: string }[]> {
-    return (this.db.query("SELECT id,private_path FROM attachments WHERE expires_at<=? AND status!='deleted' ORDER BY expires_at").all(at) as { id: AttachmentId; private_path: string }[]).map(row => ({ id: row.id, privatePath: row.private_path }));
+    return (this.db.query("SELECT a.id,a.private_path FROM attachments a WHERE a.status!='deleted' AND (a.expires_at<=? OR (a.delete_after_delivery=1 AND EXISTS (SELECT 1 FROM outbox o WHERE json_extract(o.part_json,'$.part.attachment.id')=a.id AND o.state='succeeded') AND NOT EXISTS (SELECT 1 FROM outbox o WHERE json_extract(o.part_json,'$.part.attachment.id')=a.id AND o.state NOT IN ('succeeded','failed-terminal')))) ORDER BY a.expires_at").all(at) as { id: AttachmentId; private_path: string }[]).map(row => ({ id: row.id, privatePath: row.private_path }));
   }
   async markAttachmentDeleted(id: AttachmentId): Promise<void> {
     this.db.transaction(() => {

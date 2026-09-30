@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, rm } from 'node:fs/promises';
+import { mkdir, open, rm, readdir, lstat } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { Readable } from 'node:stream';
 import type { AttachmentId, AttachmentIngest, AttachmentPort, AttachmentReader, AttachmentRegistration, BotId, BotStore, PublicAttachment } from '@vian/core';
@@ -14,7 +14,7 @@ export class AttachmentRegistry implements AttachmentPort {
     if (!name || name !== basename(name) || /[\x00-\x1f\x7f]/.test(name) || name === '.' || name === '..' || name.length > 255) throw new Error('Unsafe attachment name');
     return name;
   }
-  private async storeBytes(botId: BotId, input: AttachmentIngest, origin: 'generated' | 'inbound', ttlHours = this.defaultTtlHours): Promise<PublicAttachment> {
+  private async storeBytes(botId: BotId, input: AttachmentIngest, origin: 'generated' | 'inbound', ttlHours = this.defaultTtlHours, deleteAfterDelivery = false): Promise<PublicAttachment> {
     const bot = this.bot(botId);
     const name = this.name(input.name);
     if (!Number.isSafeInteger(input.size) || input.size < 0 || input.size > this.maxFileBytes) throw new Error('Attachment size limit exceeded');
@@ -38,7 +38,7 @@ export class AttachmentRegistry implements AttachmentPort {
       await file.close();
       const createdAt = this.now();
       const attachment: PublicAttachment = { id, name, mimeType: input.mimeType, size };
-      await bot.store.registerAttachment(attachment, path, new Date(createdAt.getTime() + ttlHours * 3600000).toISOString(), { sha256: hash.digest('hex'), origin, createdAt: createdAt.toISOString() });
+      await bot.store.registerAttachment(attachment, path, new Date(createdAt.getTime() + ttlHours * 3600000).toISOString(), { sha256: hash.digest('hex'), origin, createdAt: createdAt.toISOString(), deleteAfterDelivery });
       return attachment;
     } catch (error) { await file.close().catch(() => {}); await rm(path, { force: true }); throw error; }
   }
@@ -46,7 +46,7 @@ export class AttachmentRegistry implements AttachmentPort {
   async register(botId: BotId, input: AttachmentRegistration): Promise<PublicAttachment> {
     const file = Bun.file(input.path);
     if (!(await file.exists())) throw new Error('Attachment source unavailable');
-    return this.storeBytes(botId, { name: input.name, mimeType: input.mimeType, size: file.size, bytes: file.stream() }, 'generated', input.ttlHours);
+    return this.storeBytes(botId, { name: input.name, mimeType: input.mimeType, size: file.size, bytes: file.stream() }, 'generated', input.ttlHours, input.deleteAfterDelivery);
   }
   async open(botId: BotId, id: AttachmentId): Promise<AttachmentReader> {
     const row = await this.bot(botId).store.getAttachmentStorage(id);
@@ -69,6 +69,24 @@ export class AttachmentRegistry implements AttachmentPort {
     // Callers supply the bot registry; maintenance needs a bot list to avoid scanning the filesystem.
     for (const botId of this.knownBots) {
       const bot = this.bot(botId);
+      const attachmentDir = join(bot.root, '.vian', 'attachments');
+      for (const name of await readdir(attachmentDir).catch(() => [] as string[])) {
+        if (!/^att_[a-f0-9]{32}$/.test(name)) continue;
+        const path = join(attachmentDir,name);
+        const info = await lstat(path).catch(() => undefined);
+        if (!info?.isFile() || info.mtimeMs > now.getTime() - 24 * 3600000 || this.active.get(`${botId}:${name}`)) continue;
+        if (await bot.store.getAttachmentStorage(name as AttachmentId)) continue;
+        try { await rm(path,{force:true}); count++; } catch { this.logger.error('Orphan attachment cleanup failed'); }
+      }
+      // Trusted tools keep crash-recoverable scratch files in this bot-owned directory.
+      const scratch = join(bot.root, '.vian', 'tmp');
+      for (const name of await readdir(scratch).catch(() => [] as string[])) {
+        const path = join(scratch, name);
+        const info = await lstat(path).catch(() => undefined);
+        if (info && !info.isSymbolicLink() && info.mtimeMs <= now.getTime() - 24 * 3600000) {
+          try { await rm(path, {recursive:info.isDirectory(),force:true}); } catch { this.logger.error('Scratch cleanup failed'); }
+        }
+      }
       for (const row of await bot.store.listExpiredAttachments(now.toISOString())) {
         if (this.active.get(`${botId}:${row.id}`)) continue;
         try { await rm(row.privatePath, { force: true }); await bot.store.markAttachmentDeleted(row.id); count++; }

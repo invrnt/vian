@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtemp, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, rm, copyFile, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeToolRuntime, validateNativeToolSet, assertUniqueToolNames } from './native.ts';
@@ -103,4 +103,23 @@ test('tool audit metadata-only omits canary arguments and abort skips execution'
     expect(await runtime.execute('secret', { value: 'CANARY' }, { ...context, abortSignal: controller.signal }, store)).toMatchObject({ ok: false, error: { code: 'aborted' } });
     expect(audits).toHaveLength(3);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('maintenance removes crash leftovers only inside bot scratch and attachment directories',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'vian-orphans-'));
+ const botId='55555555-5555-4555-8555-555555555555' as BotId;
+ const store=new SqliteBotStore(botId,join(root,'bot.db'));
+ const registry=new AttachmentRegistry(id=>id===botId?{root,store}:undefined,1024);registry.trackBot(botId);
+ try {
+  const dir=join(root,'.vian','attachments');await mkdir(dir,{recursive:true});
+  const orphan=join(dir,'att_'+'a'.repeat(32)),recent=join(dir,'att_'+'b'.repeat(32));
+  await writeFile(orphan,'partial');await writeFile(recent,'registering');
+  const scratch=join(root,'.vian','tmp','pptx-interrupted');await mkdir(scratch,{recursive:true});await writeFile(join(scratch,'export.pptx'),'partial');
+  const old=new Date(Date.now()-25*3600000);await utimes(orphan,old,old);await utimes(scratch,old,old);
+  expect(await registry.expire(new Date())).toBe(1);
+  expect(await Bun.file(orphan).exists()).toBe(false);
+  expect(await Bun.file(join(scratch,'export.pptx')).exists()).toBe(false);
+  expect(await Bun.file(recent).exists()).toBe(true);
+ }finally{store.close();await rm(root,{recursive:true,force:true});}
 });

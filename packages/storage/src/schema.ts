@@ -130,4 +130,6 @@ CREATE TABLE owner_verification_events (
   external_event_id TEXT PRIMARY KEY, received_at TEXT NOT NULL
 );
 CREATE INDEX owner_verification_events_time ON owner_verification_events(received_at);
-`] as const;
+`,
+`ALTER TABLE attachments ADD COLUMN delete_after_delivery INTEGER NOT NULL DEFAULT 0;`
+] as const;

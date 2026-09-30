@@ -85,6 +85,7 @@ export async function assembleBot(record: RegistryRecord, logger: { info(message
       const currentStore = store;
       const attachments = new AttachmentRegistry(id => id === record.id ? { root: record.path, store: currentStore } : undefined, manifest.attachments.maxFileBytes, manifest.attachments.defaultTtlHours);
       attachments.trackBot(record.id);
+      await attachments.expire(new Date());
       const gate = new TelegramGate({ token, botId: record.id, ...manifest.gate.telegram, groupsEnabled: manifest.gate.access.groups, onFatal: () => logger.error('Telegram polling failed; retrying') });
       const mcpTools = Object.fromEntries(mcp.definitions().map(definition => [definition.name, {
         description: definition.description, inputSchema: definition.inputSchema,

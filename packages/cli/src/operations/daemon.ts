@@ -121,7 +121,7 @@ export class VianDaemon {
         const state: BotState = { record }; this.bots.set(record.id, state);
         if (record.enabled) await this.startBot(state).catch(() => {});
       }
-      this.maintenance = setInterval(() => { for (const state of this.bots.values()) void state.instance?.runtime.deps.attachments.expire(new Date()).catch(() => {}); }, 6 * 3600_000);
+      this.maintenance = setInterval(() => { for (const state of this.bots.values()) void state.instance?.runtime.deps.attachments.expire(new Date()).catch(() => {}); }, 60_000);
     } catch (error) { await this.stop(); throw error; }
   }
   private async control(request: ControlRequest): Promise<ControlResponse> {

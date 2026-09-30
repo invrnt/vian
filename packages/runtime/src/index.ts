@@ -435,7 +435,11 @@ export class BotRuntime {
           let outcome;
           try { outcome = await this.deps.gate.deliver(part.part, part.destination, abort.signal, { botId: this.deps.botId, attachments: this.deps.attachments }); }
           catch { outcome = { kind: 'ambiguous' as const, safeMessage: 'Delivery result is unknown.' }; }
-          if (outcome.kind === 'succeeded') await this.deps.store.updateDelivery(part.id, 'succeeded', { receipt: outcome.receipt });
+          if (outcome.kind === 'succeeded') {
+            await this.deps.store.updateDelivery(part.id, 'succeeded', { receipt: outcome.receipt });
+            // Cleanup cannot change a confirmed delivery into an ambiguous retry.
+            await this.deps.attachments.expire(this.now()).catch(() => {});
+          }
           else if (outcome.kind === 'ambiguous') await this.deps.store.updateDelivery(part.id, 'ambiguous', { safeError: outcome.safeMessage });
           else await this.deps.store.updateDelivery(part.id, outcome.retryable ? 'failed-retryable' : 'failed-terminal', { safeError: outcome.safeMessage, nextAttemptAt: outcome.retryable ? new Date(this.now().getTime() + Math.max(outcome.retryAfterMs ?? 1000, 1000)).toISOString() : undefined });
         } finally {

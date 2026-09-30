@@ -219,18 +219,18 @@ test('read-only schema inspection and additive attachment migration preserve leg
   const dir = mkdtempSync(join(tmpdir(), 'vian-schema-'));
   const path = join(dir, 'state.sqlite');
   try {
-    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 4, compatible: false });
+    expect(inspectBotSchema(path)).toEqual({ exists: false, currentVersion: 0, supportedVersion: 5, compatible: false });
     const db = new Database(path);
     const { botMigrations } = await import('./schema.ts');
     db.run(botMigrations[0]); db.run('PRAGMA user_version=1');
     const publicPart = { id: 'old' as AttachmentId, name: 'old.txt', mimeType: 'text/plain', size: 3 };
     db.query('INSERT INTO attachments(id,public_json,private_path,expires_at) VALUES (?,?,?,?)').run('old', JSON.stringify(publicPart), '/tmp/old', '2099-01-01T00:00:00.000Z');
     db.close();
-    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 4, compatible: true });
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 1, supportedVersion: 5, compatible: true });
     const store = new SqliteBotStore(botId, path);
     expect(await store.getAttachmentStorage('old' as any)).toEqual({ public: publicPart, privatePath: '/tmp/old', expiresAt: '2099-01-01T00:00:00.000Z', status: 'available' });
     store.close();
-    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 4, supportedVersion: 4, compatible: true });
+    expect(inspectBotSchema(path)).toEqual({ exists: true, currentVersion: 5, supportedVersion: 5, compatible: true });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -467,4 +467,34 @@ test('administrator sync clears removed unbound principals across restart', asyn
     expect(events).toHaveLength(4);
     reopened.close();
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+
+test('opt-in delivery cleanup is durable, waits for all consumers, and preserves uncertain uploads until TTL', async () => {
+  const f=fixture();
+  try {
+    const sessionId=await ready(f.store);
+    await f.store.acceptInbound(event('cleanup'));
+    const claim=await f.store.claimNext(sessionId,'owner',new Date(Date.now()+60000).toISOString());
+    if(claim.kind!=='ok'||!claim.value) throw Error('claim failed');
+    const runId='cleanup-run' as RunId; await f.store.beginRun(runId,claim.value,principalId);
+    const attachment={id:'cleanup-file' as AttachmentId,name:'slides.pptx',mimeType:'application/octet-stream',size:3};
+    await f.store.registerAttachment(attachment,'/private/slides','2099-01-01T00:00:00.000Z',{sha256:'a'.repeat(64),origin:'generated',createdAt:new Date().toISOString(),deleteAfterDelivery:true});
+    const message:CanonicalMessage={id:'cleanup-message' as MessageId,botId,conversationId,sessionId,runId,role:'assistant',parts:[],createdAt:new Date().toISOString()};
+    const parts:OutboxPart[]=[0,1].map(i=>({id:'cleanup-'+i,botId,messageId:message.id,destination,part:{partIndex:i,kind:'file',attachment},state:'queued',attempt:0}));
+    await f.store.completeRun(runId,message,parts);
+    expect(await f.store.listExpiredAttachments(new Date().toISOString())).toEqual([]);
+    await f.store.updateDelivery(parts[0].id,'sending');
+    await f.store.updateDelivery(parts[0].id,'succeeded');
+    expect(await f.store.listExpiredAttachments(new Date().toISOString())).toEqual([]);
+    await f.store.updateDelivery(parts[1].id,'sending');
+    await f.store.updateDelivery(parts[1].id,'ambiguous');
+    expect(await f.store.listExpiredAttachments(new Date().toISOString())).toEqual([]);
+    expect((await f.store.listExpiredAttachments('2100-01-01T00:00:00.000Z')).length).toBe(1);
+    const db=new Database(f.path);
+    db.query("UPDATE outbox SET state='succeeded' WHERE id=?").run(parts[1].id);db.close();
+    // A fresh connection sees eligibility after restart even if immediate cleanup never ran.
+    const restarted=new SqliteBotStore(botId,f.path);
+    expect(await restarted.listExpiredAttachments(new Date().toISOString())).toEqual([{id:attachment.id,privatePath:'/private/slides'}]);restarted.close();
+  } finally { f.cleanup(); }
 });

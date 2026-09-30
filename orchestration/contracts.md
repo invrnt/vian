@@ -37,3 +37,8 @@ Authority: [testing exports](../packages/testing/src/index.ts), [contracts.test.
 ## C09: Safe model-step continuation
 
 Authority: [execution.ts](../packages/core/src/execution.ts), [contracts.test.ts](../packages/testing/src/contracts.test.ts). The pinned AI SDK 7.0.111 `prepareStep` hook accepts a message override after a completed tool batch. Runtime claims an ordered, authorized finite steering batch only at that boundary. The SDK conformance test proves tool-call/result pairing survives and the tool runs once.
+
+C06 retention extension: `AttachmentRegistration.deleteAfterDelivery` is trusted,
+opt-in metadata persisted as `attachments.delete_after_delivery`. Expiry queries
+include confirmed outbox completion only when no known consumer remains pending.
+Ordinary attachments keep their original TTL behavior; active readers defer removal.
